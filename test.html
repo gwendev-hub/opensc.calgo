@@ -692,16 +692,20 @@
         },
       },
       {
-        title: "Main page: button, plan cards and grocery list",
+        title: "Main page: tabs, plan cards and grocery list",
         expected:
-          "With default settings and all foods ticked, the button shows 3 cards (Cheapest realistic selected), " +
-          "its grocery list and protein quality; tapping a card switches the list; changing a setting marks it out of date",
+          "Each tab shows only its own panel. With default settings and all foods ticked, the button on the Plans tab " +
+          "shows 3 cards (Cheapest realistic selected); tapping a card selects it and opens the List tab with its grocery " +
+          "list and protein quality; the open tab is remembered; changing a setting shows a dot on Plans and the 'out of date' note",
         async run(app) {
           const page = await pagePlans(app);
           const three = scenarios.three();
           const rowsOk = (key, rows) => three[key].status === "optimal" && rows === three[key].items.length;
           return {
             checks: [
+              [`tapping each tab shows only its panel: ${page.tabsShown.join(", ")}`, page.tabsShown.join() === "settings,foods,plans,list"],
+              ["tab bar buttons are at least 44 px tall", page.tabHeights.every((h) => h >= 44)],
+              [`still on the Plans tab after pressing the button (open: ${page.tabAfterRun})`, page.tabAfterRun === "plans"],
               [`cards: ${page.cards.join(", ")}`, page.cards.join() === THREE.join()],
               [`selected by default: ${page.selectedAtStart}`, page.selectedAtStart === "realistic"],
               [`each card shows cost vs budget, protein, kcal, % Excellent and food count`, page.cardsHaveStats],
@@ -713,20 +717,24 @@
               [`after tapping Absolute cheapest: "${page.afterTap.heading}", ${page.afterTap.rows} foods`,
                 page.afterTap.heading === "Absolute cheapest" && rowsOk("cheapest", page.afterTap.rows)],
               ["tapped card is now the selected one", page.afterTap.selected === "cheapest"],
+              [`tapping the card opened the List tab (open: ${page.afterTap.tab})`, page.afterTap.tab === "list"],
+              [`open tab remembered in localStorage ("${page.afterTap.savedTab}")`, page.afterTap.savedTab === "list"],
+              ["no 'out of date' dot before any change", !page.dotBefore],
+              ["changing a setting shows the dot on the Plans tab", page.dotAfter],
               ["changing a setting shows the 'out of date' note", page.staleShown],
             ],
-            notes: ["Runs on the real index.html in a hidden frame; your own saved settings and ticks are put back afterwards."],
+            notes: ["Runs on the real index.html in a hidden frame; your own saved settings, ticks and open tab are put back afterwards."],
           };
         },
       },
     ];
 
-    // Drive the real page in the hidden frame: default settings, tick every food,
-    // press the button, read the cards and list, tap a card, change a setting.
-    // The page saves settings and ticks in localStorage, so those are put back afterwards.
+    // Drive the real page in the hidden frame: open each tab, set default settings,
+    // tick every food, press the button, read the cards and list, tap a card, change a setting.
+    // The page saves settings, ticks and the open tab in localStorage, so those are put back afterwards.
     async function pagePlans(app) {
       const doc = app.document;
-      const keys = ["pbp.settings", "pbp.ticks"];
+      const keys = ["pbp.settings", "pbp.ticks", "pbp.tab"];
       const saved = keys.map((k) => app.localStorage.getItem(k));
       const fire = (el, type) => el.dispatchEvent(new app.Event(type, { bubbles: true }));
       const setInput = (id, value) => {
@@ -755,8 +763,21 @@
         };
       };
       const selectedKey = () => (doc.querySelector('.plan-card[aria-pressed="true"]') || { dataset: {} }).dataset.key;
+      // Which tab's panel is visible right now (or a list if more than one is)
+      const openTab = () =>
+        [...doc.querySelectorAll(".tab-panel")].filter((p) => !p.hidden).map((p) => p.id.replace("panel-", "")).join("+");
+      // Tap a tab in the tab bar
+      const tapTab = (name) => doc.querySelector(`.tab-bar [data-tab="${name}"]`).click();
 
       try {
+        // Tap each tab and see which panel is shown
+        const tabsShown = ["settings", "foods", "plans", "list"].map((name) => {
+          tapTab(name);
+          return openTab();
+        });
+        // Tab buttons' height (the frame is hidden, so measure the CSS min-height instead of the layout)
+        const tabHeights = [...doc.querySelectorAll(".tab-bar .tab")].map((t) => parseFloat(app.getComputedStyle(t).minHeight));
+
         // Default settings and every food ticked, so the page matches scenarios.three()
         setInput("budget", DEFAULTS.budget);
         setInput("kcal", DEFAULTS.kcal);
@@ -769,7 +790,8 @@
           }
         }
 
-        // Press the button and wait for the cards (the page itself re-enables the button when done)
+        // Go to the Plans tab, press the button and wait for the cards (the page re-enables the button when done)
+        tapTab("plans");
         doc.getElementById("make-list").click();
         await waitFor(() => doc.querySelectorAll(".plan-card").length === 3 && !doc.getElementById("make-list").disabled);
 
@@ -778,18 +800,25 @@
           /[\d,]+ kr/.test(c.querySelector(".plan-cost").textContent) && /[\d,]+ kr budget/.test(c.textContent) &&
           /g protein\/day/.test(c.textContent) &&
           /kcal\/day/.test(c.textContent) && /protein from Excellent/.test(c.textContent) && /\d+ foods/.test(c.textContent));
+        const tabAfterRun = openTab();
         const selectedAtStart = selectedKey();
+        // The List tab is already filled in for the selected plan, even before it's opened
         const first = readDetail();
+        const dotBefore = !doc.getElementById("plans-dot").hidden;
 
-        // Tap the "Absolute cheapest" card
+        // Tap the "Absolute cheapest" card: it should be selected and the List tab should open
         doc.querySelector('.plan-card[data-key="cheapest"]').click();
-        const afterTap = { ...readDetail(), selected: selectedKey() };
+        const afterTap = { ...readDetail(), selected: selectedKey(), tab: openTab(), savedTab: app.localStorage.getItem("pbp.tab") };
 
-        // Change a setting: the "out of date" note should appear
+        // Change a setting: the dot and the "out of date" note should appear
         setInput("protein", DEFAULTS.protein + 1);
+        const dotAfter = !doc.getElementById("plans-dot").hidden;
         const staleShown = !doc.getElementById("plans-stale").hidden;
 
-        return { cards: cards.map((c) => c.dataset.key), cardsHaveStats, selectedAtStart, first, afterTap, staleShown };
+        return {
+          tabsShown, tabHeights, tabAfterRun, cards: cards.map((c) => c.dataset.key), cardsHaveStats,
+          selectedAtStart, first, afterTap, dotBefore, dotAfter, staleShown,
+        };
       } finally {
         // Put the user's own saved settings and ticks back
         keys.forEach((k, i) => (saved[i] === null ? app.localStorage.removeItem(k) : app.localStorage.setItem(k, saved[i])));

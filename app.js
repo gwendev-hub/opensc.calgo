@@ -340,12 +340,18 @@ function renderPlanDetail() {
     ${proteinQualityHtml(plan)}`;
 }
 
-// Draw the three cards, then the selected plan
+// Draw the three cards (Plans tab) and the selected plan (List tab)
 function renderPlans() {
   document.getElementById("plan-cards").innerHTML = PLAN_ORDER.map((key) => planCardHtml(plans[key])).join("");
   renderPlanDetail();
+  // Swap the "nothing yet" texts for the real content
+  document.getElementById("plans-empty").hidden = true;
   document.getElementById("plans").hidden = false;
+  document.getElementById("list-empty").hidden = true;
+  document.getElementById("plan-detail").hidden = false;
+  // The plans are fresh again: no "out of date" note or dot
   document.getElementById("plans-stale").hidden = true;
+  document.getElementById("plans-dot").hidden = true;
 }
 
 // Check the settings before running the optimizer. Returns an error text, or null if fine.
@@ -388,7 +394,7 @@ async function makeGroceryList() {
   }
 }
 
-// A card was tapped: select it and show its plan below
+// A card was tapped: select it and open its grocery list on the List tab
 function selectPlan(key) {
   selectedPlan = key;
   // Update the highlighted card without redrawing everything
@@ -398,15 +404,67 @@ function selectPlan(key) {
     card.setAttribute("aria-pressed", String(isSelected));
   }
   renderPlanDetail();
-  // On a phone the cards are stacked, so bring the list into view
-  if (window.matchMedia("(max-width: 599px)").matches) {
-    document.getElementById("plan-detail").scrollIntoView({ behavior: "smooth", block: "start" });
+  showTab("list", { toTop: true });
+}
+
+// Settings or ticks changed after a list was made: show the "out of date"
+// note on the Plans tab and a dot on the Plans tab button
+function markPlansStale() {
+  if (!plans) return;
+  document.getElementById("plans-stale").hidden = false;
+  document.getElementById("plans-dot").hidden = false;
+}
+
+// ---------- Tabs ----------
+
+// Key used to remember the last open tab
+const TAB_KEY = "pbp.tab";
+
+// The four tabs, in the order of the tab bar
+const TABS = ["settings", "foods", "plans", "list"];
+
+// Where each tab was scrolled to, so coming back to e.g. Foods keeps your place
+const tabScroll = {};
+
+// The tab that's open right now
+let currentTab = null;
+
+// Read the last open tab from localStorage ("settings" if none, or storage is blocked)
+function loadTab() {
+  try {
+    const saved = localStorage.getItem(TAB_KEY);
+    return TABS.includes(saved) ? saved : "settings";
+  } catch (err) {
+    return "settings";
   }
 }
 
-// Settings or ticks changed after a list was made: say the list is out of date
-function markPlansStale() {
-  if (plans) document.getElementById("plans-stale").hidden = false;
+// Remember the open tab for next time
+function saveTab(name) {
+  try {
+    localStorage.setItem(TAB_KEY, name);
+  } catch (err) {
+    // The page still works; it just opens on Settings next time
+  }
+}
+
+// Show one tab's panel and hide the others.
+// toTop: start at the top of the tab instead of where it was last scrolled to.
+function showTab(name, { toTop = false } = {}) {
+  // Remember how far the old tab was scrolled
+  if (currentTab) tabScroll[currentTab] = window.scrollY;
+
+  for (const tab of TABS) {
+    const isOpen = tab === name;
+    document.getElementById("panel-" + tab).hidden = !isOpen;
+    const button = document.getElementById("tab-" + tab);
+    button.setAttribute("aria-selected", String(isOpen));
+    button.classList.toggle("active", isOpen);
+  }
+
+  currentTab = name;
+  saveTab(name);
+  window.scrollTo(0, toTop ? 0 : tabScroll[name] || 0);
 }
 
 // ---------- Start-up ----------
@@ -451,6 +509,21 @@ function init() {
     const card = event.target.closest(".plan-card");
     if (card) selectPlan(card.dataset.key);
   });
+
+  // A tab in the tab bar was tapped
+  document.querySelector(".tab-bar").addEventListener("click", (event) => {
+    const tab = event.target.closest(".tab");
+    if (tab) showTab(tab.dataset.tab);
+  });
+
+  // Buttons like "Go to Plans" that jump to another tab
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest("[data-go-tab]");
+    if (link) showTab(link.dataset.goTab, { toTop: true });
+  });
+
+  // Open the tab that was open last time
+  showTab(loadTab());
 
   loadFoods();
 }

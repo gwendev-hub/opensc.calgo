@@ -256,17 +256,25 @@ Switch the variables to **whole packages per month**, using integer variables in
 
 ## 6. Screens (one page, mobile-first)
 
-1. **Settings card:** budget, kcal, protein, days. Large inputs with sensible defaults (4,000 kr, 1,700 kcal, 110 g, 30 days).
-2. **Foods list:** grouped by category, each food with a checkbox, its rating badge (green, yellow or red), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. Tapping a food opens its min/max fields (advanced, hidden by default).
-3. **"Make my grocery list" button**
-4. **Three comparison cards** (section 5, "Three plans"), side by side on a wide screen and stacked on a phone: *Absolute cheapest*, *Cheapest realistic*, *High quality*. Each card shows total cost vs the budget, protein and kcal per day, % of protein from Excellent foods and the number of foods, or the message saying why that plan isn't possible. Tapping a card opens its result card below.
-5. **Result card** (for the chosen plan):
+Still one `index.html`, split into **four tabs**. Switching tabs only shows one section and hides the others (plain JavaScript, no page loads). The last open tab is remembered in `localStorage` (wrapped in try/catch), and each tab keeps its own scroll position while the page is open.
+
+**Tab bar:** fixed to the bottom of the screen on a phone, like a phone app: four buttons with an icon and a short label, at least 44 px tall (60 px), with room for the iPhone home indicator. On a wide screen (760 px and up) it sits at the top instead, with icon and label side by side. The open tab is green and bold.
+
+1. **Settings tab:** budget, kcal, protein, days. Large inputs with sensible defaults (4,000 kr, 1,700 kcal, 110 g, 30 days).
+2. **Foods tab:** the personal target-density line, the "Sort by" choice, and the food list grouped by category: each food with a checkbox, its rating badge (green, yellow or red), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. Tapping a food opens its min/max fields (advanced, hidden by default; step 6).
+3. **Plans tab:**
+   - The **"Make my grocery list"** button, which runs `Optimizer.planAll`. Before the first run, a short hint says what it does.
+   - **Three comparison cards** (section 5, "Three plans"), side by side on a wide screen and stacked on a phone: *Absolute cheapest*, *Cheapest realistic* (selected by default), *High quality*. Each card shows total cost vs the budget, protein and kcal per day, % of protein from Excellent foods and the number of foods, or "Not possible".
+   - **Tapping a card selects it and opens the List tab.**
+   - **Out of date:** if settings or ticks change after plans were made, a small red dot appears on the Plans tab button and an "out of date" note appears above the cards, until the button is pressed again.
+4. **List tab** (for the selected plan; before the first run it says to make plans first, with a "Go to Plans" button):
    - Top line: **Total 3,420 kr of 4,000 kr ✔** · **112 g protein/day** · **1,690 kcal/day**
-   - Grocery table: food, rating badge, packages, amount per day, cost
+   - Messages, e.g. over budget, or why the plan isn't possible
+   - Grocery table: food, rating badge, amount per day, packages, cost, and a total
    - **Protein quality** section (section 4.4)
-   - A "Copy list" button that copies plain text to paste into Notes or a message
-   - Warnings, such as infeasible plans or large leftovers
-6. **Footer:** where the prices come from and their date, a "not medical advice" note, and a feedback link.
+   - A "Copy list" button that copies plain text to paste into Notes or a message (step 6)
+   - Warnings such as large leftovers (step 5)
+5. **Footer:** where the prices come from and their date, a "not medical advice" note, and a feedback link (on every tab, above the tab bar).
 
 ---
 

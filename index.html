@@ -3,7 +3,7 @@
 <head>
   <!-- Basic page setup: text encoding and phone-friendly scaling -->
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Protein Budget Planner</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -15,60 +15,109 @@
       <p class="subtitle">The cheapest monthly grocery list that hits your protein and calorie targets.</p>
     </header>
 
-    <!-- Settings card: the four numbers the optimizer will use -->
-    <section class="card" aria-labelledby="settings-title">
-      <h2 id="settings-title">Settings</h2>
-      <form id="settings-form">
-        <!-- Monthly budget in Swedish kronor -->
-        <label for="budget">Monthly budget (kr)</label>
-        <input id="budget" name="budget" type="number" inputmode="numeric" min="0" step="50" value="4000">
+    <!-- ===== Tab 1: Settings ===== -->
+    <div id="panel-settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-settings">
+      <!-- Settings card: the four numbers the optimizer will use -->
+      <section class="card" aria-labelledby="settings-title">
+        <h2 id="settings-title">Settings</h2>
+        <form id="settings-form">
+          <!-- Monthly budget in Swedish kronor -->
+          <label for="budget">Monthly budget (kr)</label>
+          <input id="budget" name="budget" type="number" inputmode="numeric" min="0" step="50" value="4000">
 
-        <!-- Daily calorie target -->
-        <label for="kcal">Daily calories (kcal)</label>
-        <input id="kcal" name="kcal" type="number" inputmode="numeric" min="0" step="50" value="1700">
+          <!-- Daily calorie target -->
+          <label for="kcal">Daily calories (kcal)</label>
+          <input id="kcal" name="kcal" type="number" inputmode="numeric" min="0" step="50" value="1700">
 
-        <!-- Daily protein minimum -->
-        <label for="protein">Daily protein minimum (g)</label>
-        <input id="protein" name="protein" type="number" inputmode="numeric" min="0" step="5" value="110">
+          <!-- Daily protein minimum -->
+          <label for="protein">Daily protein minimum (g)</label>
+          <input id="protein" name="protein" type="number" inputmode="numeric" min="0" step="5" value="110">
 
-        <!-- How many days the grocery list should cover -->
-        <label for="days">Days in the period</label>
-        <input id="days" name="days" type="number" inputmode="numeric" min="1" max="62" step="1" value="30">
-      </form>
-    </section>
+          <!-- How many days the grocery list should cover -->
+          <label for="days">Days in the period</label>
+          <input id="days" name="days" type="number" inputmode="numeric" min="1" max="62" step="1" value="30">
+        </form>
+      </section>
+    </div>
 
-    <!-- Foods card: tick the foods you'd eat. The list itself is built by app.js from data/foods.json -->
-    <section class="card" aria-labelledby="foods-title">
-      <h2 id="foods-title">Foods</h2>
-      <p class="hint">
-        Your targets need at least <strong id="target-density">–</strong> g protein per 100 kcal
-        on average across the whole plan.
-        Foods with more than 10 g protein per 100 kcal <em>lift</em> your plan; the rest <em>dilute</em> it.
-      </p>
+    <!-- ===== Tab 2: Foods ===== -->
+    <div id="panel-foods" class="tab-panel" role="tabpanel" aria-labelledby="tab-foods" hidden>
+      <!-- Foods card: tick the foods you'd eat. The list itself is built by app.js from data/foods.json -->
+      <section class="card" aria-labelledby="foods-title">
+        <h2 id="foods-title">Foods</h2>
+        <p class="hint">
+          Your targets need at least <strong id="target-density">–</strong> g protein per 100 kcal
+          on average across the whole plan.
+          Foods with more than 10 g protein per 100 kcal <em>lift</em> your plan; the rest <em>dilute</em> it.
+        </p>
 
-      <!-- How to order foods inside each category -->
-      <label for="food-sort">Sort by</label>
-      <select id="food-sort">
-        <option value="rating">Protein rating</option>
-        <option value="price">Price per 100 g protein</option>
-      </select>
+        <!-- How to order foods inside each category -->
+        <label for="food-sort">Sort by</label>
+        <select id="food-sort">
+          <option value="rating">Protein rating</option>
+          <option value="price">Price per 100 g protein</option>
+        </select>
 
-      <!-- app.js fills this with one group per category -->
-      <div id="food-list" aria-live="polite">Loading foods…</div>
-    </section>
+        <!-- app.js fills this with one group per category -->
+        <div id="food-list" aria-live="polite">Loading foods…</div>
+      </section>
+    </div>
 
-    <!-- The big button that runs the optimizer (enabled once the food data has loaded) -->
-    <button type="button" id="make-list" class="primary" disabled>Make my grocery list</button>
-    <p id="plan-error" class="error" role="alert"></p>
-
-    <!-- Results: three comparison cards, then the selected plan (hidden until the first run) -->
-    <section id="plans" aria-labelledby="plans-title" hidden>
-      <h2 id="plans-title" class="section-title">Your plans</h2>
+    <!-- ===== Tab 3: Plans – the button and the three comparison cards ===== -->
+    <div id="panel-plans" class="tab-panel" role="tabpanel" aria-labelledby="tab-plans" hidden>
+      <!-- The big button that runs the optimizer (enabled once the food data has loaded) -->
+      <button type="button" id="make-list" class="primary" disabled>Make my grocery list</button>
+      <p id="plan-error" class="error" role="alert"></p>
       <p id="plans-stale" class="warning" hidden>You changed something. Tap “Make my grocery list” again to update.</p>
-      <div id="plan-cards" class="plan-cards"></div>
-      <section id="plan-detail" class="card" aria-live="polite"></section>
-    </section>
+
+      <!-- Before the first run -->
+      <p id="plans-empty" class="hint">Tap the button to make three plans from your settings and ticked foods.</p>
+
+      <!-- After a run: tap a card to see its grocery list on the List tab -->
+      <section id="plans" aria-labelledby="plans-title" hidden>
+        <h2 id="plans-title" class="section-title">Your plans</h2>
+        <p class="hint">Tap a plan to see its grocery list.</p>
+        <div id="plan-cards" class="plan-cards"></div>
+      </section>
+    </div>
+
+    <!-- ===== Tab 4: List – the selected plan's grocery list and protein quality ===== -->
+    <div id="panel-list" class="tab-panel" role="tabpanel" aria-labelledby="tab-list" hidden>
+      <!-- Before the first run -->
+      <section id="list-empty" class="card">
+        <p class="hint">No list yet. Make your plans on the Plans tab first.</p>
+        <button type="button" class="secondary" data-go-tab="plans">Go to Plans</button>
+      </section>
+      <section id="plan-detail" class="card" aria-live="polite" hidden></section>
+    </div>
   </main>
+
+  <!-- Tab bar. Each button shows one panel above (app.js). Icons are simple inline SVGs. -->
+  <nav class="tab-bar" role="tablist" aria-label="Sections">
+    <button type="button" class="tab" id="tab-settings" role="tab" aria-controls="panel-settings" aria-selected="true" data-tab="settings">
+      <!-- Sliders icon -->
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+      <span class="tab-label">Settings</span>
+    </button>
+    <button type="button" class="tab" id="tab-foods" role="tab" aria-controls="panel-foods" aria-selected="false" data-tab="foods">
+      <!-- Ticked checklist icon -->
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l2 2 3-3M4 13l2 2 3-3M4 20l2 2 3-3M12 7h8M12 14h8M12 21h8"/></svg>
+      <span class="tab-label">Foods</span>
+    </button>
+    <button type="button" class="tab" id="tab-plans" role="tab" aria-controls="panel-plans" aria-selected="false" data-tab="plans">
+      <!-- Three cards icon, plus a dot when the plans are out of date -->
+      <span class="tab-icon">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="9.5" y="4" width="5" height="16" rx="1"/><rect x="16" y="4" width="5" height="16" rx="1"/></svg>
+        <span id="plans-dot" class="tab-dot" hidden><span class="visually-hidden">(out of date)</span></span>
+      </span>
+      <span class="tab-label">Plans</span>
+    </button>
+    <button type="button" class="tab" id="tab-list" role="tab" aria-controls="panel-list" aria-selected="false" data-tab="list">
+      <!-- Shopping basket icon -->
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18l-2 11H5L3 9zM8 9l3-6M16 9l-3-6M9 13v4M15 13v4"/></svg>
+      <span class="tab-label">List</span>
+    </button>
+  </nav>
 
   <!-- The LP solver (pinned version), then the optimizer that uses it -->
   <script src="https://cdn.jsdelivr.net/npm/javascript-lp-solver@0.4.24/prod/solver.js"></script>

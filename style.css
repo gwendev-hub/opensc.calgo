@@ -368,3 +368,131 @@ button.primary:disabled {
 .legend .badge {
   margin: 0 4px 0 0;
 }
+
+/* ---------- Tabs ---------- */
+
+/* Leave room under the content so the fixed tab bar never covers it.
+   env(safe-area-inset-bottom) is the space for the iPhone home indicator. */
+main {
+  padding-bottom: calc(16px + 60px + env(safe-area-inset-bottom));
+}
+
+/* Phone: tab bar fixed to the bottom of the screen */
+.tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Each tab: icon above a short label, the full width shared equally, at least 44px tall */
+.tab {
+  flex: 1;
+  min-height: 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 0;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* Line icons drawn in the tab's text colour */
+.tab svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The open tab is green and bold */
+.tab.active {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.tab:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+/* Wrapper so the dot can sit on the icon's corner */
+.tab-icon {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Small red dot on the Plans tab when the plans are out of date */
+.tab-dot {
+  position: absolute;
+  top: -2px;
+  right: -5px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #d0453b;
+  border: 2px solid var(--card);
+}
+
+/* Text only screen readers hear, e.g. "(out of date)" */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Wide screen: the tab bar sits at the top, icon and label side by side */
+@media (min-width: 760px) {
+  main {
+    padding-top: calc(16px + 56px);
+    padding-bottom: 16px;
+  }
+
+  .tab-bar {
+    top: 0;
+    bottom: auto;
+    justify-content: center;
+    border-top: none;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+
+  .tab {
+    flex: 0 1 150px;
+    min-height: 56px;
+    flex-direction: row;
+    gap: 8px;
+    font-size: 0.95rem;
+  }
+}
+
+/* Outlined button, e.g. "Go to Plans" */
+button.secondary {
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 8px 16px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--card);
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+}
