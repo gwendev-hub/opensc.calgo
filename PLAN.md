@@ -208,7 +208,7 @@ These become constraints in the model (section 5). Defaults are listed, and all 
   - % of calories from protein (`protein × 4 / kcal`)
   - a warning if any single Poor food gives more than 15% of calories, e.g. *"Peanut butter gives 18% of your calories but only 4% of your protein."*
 
-### 4.5 Other nutrients: fibre, fat and sugar (information only)
+### 4.5 Other nutrients: fibre and fat (information only)
 These don't change the optimizer (yet); they help judge a plan. The rules live in `optimizer.js` (`Optimizer.fiberRating`, `Optimizer.nutrientWarnings`) so the page and the tests use the same code.
 
 **Per food** (small badges next to the protein badge on the Foods tab):
@@ -219,18 +219,22 @@ These don't change the optimizer (yet); they help judge a plan. The rules live i
 | **Fibre source** | fibre ≥ 3 g |
 | **Low fibre** (grey) | under 3 g |
 | **⚠ Sat. fat** | saturated fat > ⅓ of fat, for foods with at least 1 g fat |
-| **⚠ Sugar** | sugar > ⅓ of carbs, for foods with at least 1 g carbs |
 
-The 1 g minimum stops near fat-free foods (e.g. Greek yoghurt 0% with 0.2 g fat) being flagged. Natural sugars count too, so milk, kvarg, yoghurt, fruit, tomatoes and frozen vegetables get "⚠ Sugar".
+The 1 g minimum stops near fat-free foods (e.g. Greek yoghurt 0% with 0.2 g fat) being flagged. There is **no sugar warning** (it flagged milk, fruit and vegetables for their natural sugars, which wasn't useful); `sugarPer100g` stays in the data.
 
-**Per plan** (List tab, "Macros"):
-- **Pie chart** of protein / carbs / fat as a share of their energy (4 / 4 / 9 kcal per gram), so the three always add up to 100%. Drawn with a CSS `conic-gradient`, no chart library. This can differ by a point or two from "% of calories from protein" in 4.4, which divides by the label kcal.
-- **Grams** of protein, carbs, fat and fibre, with a **Daily / Monthly** toggle (monthly = per day × days in the period).
-- **Ranges**, green inside and yellow outside:
+**Per plan** (its own **Macros** tab, section 6):
+- **Plan switcher** at the top: the three plans as small buttons, so you can compare them without going back to Plans. It changes the selected plan everywhere (the Plans card and the List tab follow).
+- **Pie chart** of protein / carbs / fat / fibre as a share of their energy, drawn with a CSS `conic-gradient`, no chart library.
+- **Table** with grams, kcal and % of kcal for each macro, plus a **total kcal** row:
+  - protein × 4, carbs × 4, fat × 9, fibre × 2 kcal per gram
+  - % of kcal = that macro's kcal ÷ the total of the four, so they add up to 100% and match the pie
+  - the total can differ a little from the label kcal on the plan cards; a hint under the table says so. It can also differ by a point or two from "% of calories from protein" in 4.4, which divides by the label kcal.
+- **Daily / Monthly** toggle for the grams and kcal (monthly = per day × days in the period); the % don't change.
+- **Ranges**, green inside and yellow outside (always daily values):
   - fibre per day: 25–35 g
-  - fat: 25–40% of energy
-  - carbs: 45–60% of energy
-- `summarise` in the optimizer adds `carbsPerDay`, `fatPerDay`, `fiberPerDay`, `saturatedFatPerDay`, `sugarPerDay` to `totals`, and `macroKcalShare` to `quality`.
+  - fat: 25–40% of kcal (from the table)
+  - carbs: 45–60% of kcal (from the table)
+- `summarise` in the optimizer adds `carbsPerDay`, `fatPerDay`, `fiberPerDay`, `saturatedFatPerDay`, `sugarPerDay` to `totals`, and `macroKcal` (kcal per macro), `macroKcalTotal` and `macroKcalShare` to `quality`.
 
 ---
 
@@ -297,26 +301,30 @@ Switch the variables to **whole packages per month**, using integer variables in
 
 ## 6. Screens (one page, mobile-first)
 
-Still one `index.html`, split into **four tabs**. Switching tabs only shows one section and hides the others (plain JavaScript, no page loads). The last open tab is remembered in `localStorage` (wrapped in try/catch), and each tab keeps its own scroll position while the page is open.
+Still one `index.html`, split into **five tabs**. Switching tabs only shows one section and hides the others (plain JavaScript, no page loads). The last open tab is remembered in `localStorage` (wrapped in try/catch), and each tab keeps its own scroll position while the page is open.
 
-**Tab bar:** fixed to the bottom of the screen on a phone, like a phone app: four buttons with an icon and a short label, at least 44 px tall (60 px), with room for the iPhone home indicator. On a wide screen (760 px and up) it sits at the top instead, with icon and label side by side. The open tab is green and bold.
+**Tab bar:** fixed to the bottom of the screen on a phone, like a phone app: five buttons with an icon and a short label, at least 44 px tall (60 px), with room for the iPhone home indicator. On a wide screen (760 px and up) it sits at the top instead, with icon and label side by side. The open tab is green and bold.
 
 1. **Settings tab:** budget, kcal, protein, days. Large inputs with sensible defaults (4,000 kr, 1,700 kcal, 110 g, 30 days).
-2. **Foods tab:** the personal target-density line, the "Sort by" choice, and the food list grouped by category: each food with a checkbox, its rating badge (green, yellow or red), small fibre and ⚠ badges (section 4.5), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. Tapping a food opens its min/max fields (advanced, hidden by default; step 6).
+2. **Foods tab:** the personal target-density line, the "Sort by" choice, and the food list grouped by category: each food with a checkbox, its rating badge (green, yellow or red), small fibre and ⚠ sat. fat badges (section 4.5), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. Tapping a food opens its min/max fields (advanced, hidden by default; step 6).
 3. **Plans tab:**
    - The **"Make my grocery list"** button, which runs `Optimizer.planAll`. Before the first run, a short hint says what it does.
    - **Three comparison cards** (section 5, "Three plans"), side by side on a wide screen and stacked on a phone: *Absolute cheapest*, *Cheapest realistic* (selected by default), *High quality*. Each card shows total cost vs the budget, protein and kcal per day, % of protein from Excellent foods and the number of foods, or "Not possible".
    - **Tapping a card selects it and opens the List tab.**
    - **Out of date:** if settings or ticks change after plans were made, a small red dot appears on the Plans tab button and an "out of date" note appears above the cards, until the button is pressed again.
-4. **List tab** (for the selected plan; before the first run it says to make plans first, with a "Go to Plans" button):
+4. **List tab** (grocery list and protein quality only, for the selected plan; before the first run it says to make plans first, with a "Go to Plans" button):
    - Top line: **Total 3,420 kr of 4,000 kr ✔** · **112 g protein/day** · **1,690 kcal/day**
    - Messages, e.g. over budget, or why the plan isn't possible
    - Grocery table: food, rating badge, amount per day, packages, cost, and a total
    - **Protein quality** section (section 4.4)
-   - **Macros** section (section 4.5): pie chart of protein / carbs / fat, grams with a Daily / Monthly toggle, and the fibre / fat / carbs range checks
    - A "Copy list" button that copies plain text to paste into Notes or a message (step 6)
    - Warnings such as large leftovers (step 5)
-5. **Footer:** where the prices come from and their date, a "not medical advice" note, and a feedback link (on every tab, above the tab bar).
+5. **Macros tab** (for the selected plan; before the first run it says to make plans first, with a "Go to Plans" button). Pie-chart icon. See section 4.5:
+   - Plan switcher with the three plans at the top (tapping one stays on Macros)
+   - Daily / Monthly toggle
+   - Pie chart and the table: grams, kcal and % of kcal for protein (×4), carbs (×4), fat (×9) and fibre (×2), plus a total kcal row
+   - The fibre / fat / carbs range rows
+6. **Footer:** where the prices come from and their date, a "not medical advice" note, and a feedback link (on every tab, above the tab bar).
 
 ---
 
@@ -365,10 +373,11 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 19 | Food-group limits | In plans 2 and 3: dairy ≤ 700 g/day; rice + pasta + bulgur + oats ≤ 200 g dry/day; every group in `groups.json` has members |
 | 20 | Budget 1,500 kr (between plan 2 and plan 3) | Plans 1 and 2 fit; plan 3 has no plan and says what it would cost and how far over budget |
 | 21 | Only 9 foods ticked | Plan 1 still works; plans 2 and 3 say they need at least 10 different foods (and nothing misleading) |
-| 22 | Main page with tabs (real `index.html`) | Each tab shows only its panel; tab buttons ≥ 44 px; the button on Plans shows 3 cards with Cheapest realistic selected; tapping a card selects it and opens List with its grocery list and protein quality; the open tab is remembered; a change shows the dot on Plans and the "out of date" note |
+| 22 | Main page with tabs (real `index.html`) | Each tab shows only its panel; tab buttons ≥ 44 px; the button on Plans shows 3 cards with Cheapest realistic selected; tapping a card selects it and opens List with its grocery list and protein quality; the List tab has no macros; the open tab is remembered; a change shows the dot on Plans and the "out of date" note |
 | 23 | Nutrients add up | Every food has the 5 nutrient fields, saturated fat ≤ fat, sugar ≤ carbs, and kcal ≈ 4P + 4C + 9F + 2 fibre within 15% (failures are listed) |
-| 24 | Fibre ratings and warnings | e.g. lentils, oats, chickpeas, Oumph, bread = High fibre; pasta, frozen veg, Quest chips = Source; rice, keso, tuna = Low; prästost, keso, Barebells, milk = ⚠ sat. fat; banana, apple, milk, keso, Greek yoghurt = ⚠ sugar; Greek yoghurt 0% has no sat. fat warning; the Foods tab badges match |
-| 25 | Macro view (real `index.html`) | Pie drawn with a conic gradient, legend % adds up to 100; daily grams match the optimizer; Monthly shows grams × days; fibre / fat / carbs rows are green or yellow as expected |
+| 24 | Fibre ratings and warnings | e.g. lentils, oats, chickpeas, Oumph, bread = High fibre; pasta, frozen veg, Quest chips = Source; rice, keso, tuna = Low; prästost, keso, Barebells, milk = ⚠ sat. fat; Greek yoghurt 0% has no sat. fat warning; no food gets a sugar warning and the page never shows "⚠ Sugar" (sugarPer100g still in the data); the Foods tab badges match |
+| 25 | Macro view (real `index.html`, Macros tab) | Pie drawn with a conic gradient (4 slices); table rows protein, carbs, fat, fibre with grams matching the optimizer, kcal = grams × 4 / 4 / 9 / 2, % of kcal adding up to 100, and a total kcal row; Monthly shows grams and kcal × days with the same %; fibre / fat / carbs rows are green or yellow as expected |
+| 26 | Macros tab and plan switcher (real `index.html`) | Macros is the fifth tab, after List, with its own icon; the switcher shows the three plans (≥ 44 px), starts on the selected plan, and tapping a plan shows its total kcal, stays on Macros, and selects its Plans card and List |
 
 "Tuna" in tests 4, 8 and 9 means both tuna products (canned and frozen). Test 4 also uses a food set where tuna is normally picked, and test 6 adds a stress case (quality rules off, every max × 10) so the variety cap actually has to do something. `test.html` also shows the three default plans side by side.
 

@@ -696,14 +696,15 @@
         expected:
           "Each tab shows only its own panel. With default settings and all foods ticked, the button on the Plans tab " +
           "shows 3 cards (Cheapest realistic selected); tapping a card selects it and opens the List tab with its grocery " +
-          "list and protein quality; the open tab is remembered; changing a setting shows a dot on Plans and the 'out of date' note",
+          "list and protein quality (no macros: they have their own tab); the open tab is remembered; changing a setting " +
+          "shows a dot on Plans and the 'out of date' note",
         async run(app) {
           const page = await pagePlansOnce(app);
           const three = scenarios.three();
           const rowsOk = (key, rows) => three[key].status === "optimal" && rows === three[key].items.length;
           return {
             checks: [
-              [`tapping each tab shows only its panel: ${page.tabsShown.join(", ")}`, page.tabsShown.join() === "settings,foods,plans,list"],
+              [`tapping each tab shows only its panel: ${page.tabsShown.join(", ")}`, page.tabsShown.join() === "settings,foods,plans,list,macros"],
               ["tab bar buttons are at least 44 px tall", page.tabHeights.every((h) => h >= 44)],
               [`still on the Plans tab after pressing the button (open: ${page.tabAfterRun})`, page.tabAfterRun === "plans"],
               [`cards: ${page.cards.join(", ")}`, page.cards.join() === THREE.join()],
@@ -714,6 +715,7 @@
               ["every row has a rating badge", page.first.badges === page.first.rows],
               [`total shown: ${page.first.total}`, page.first.total === `${Math.round(three.realistic.totals.shoppingCost).toLocaleString("en-GB")} kr`],
               ["protein quality section with coloured bar", page.first.hasQuality],
+              ["the List tab has no macro pie, table or toggle", !page.first.hasMacros && !page.afterTap.hasMacros],
               [`after tapping Absolute cheapest: "${page.afterTap.heading}", ${page.afterTap.rows} foods`,
                 page.afterTap.heading === "Absolute cheapest" && rowsOk("cheapest", page.afterTap.rows)],
               ["tapped card is now the selected one", page.afterTap.selected === "cheapest"],
@@ -760,8 +762,8 @@
       {
         title: "Fibre ratings and nutrient warnings",
         expected:
-          "Fibre High ≥ 6 g, Source ≥ 3 g, else Low; ⚠ when saturated fat > ⅓ of fat or sugar > ⅓ of carbs " +
-          "(only for foods with at least 1 g fat / carbs); the Foods tab shows the same badges",
+          "Fibre High ≥ 6 g, Source ≥ 3 g, else Low; ⚠ Sat. fat when saturated fat > ⅓ of fat (only for foods with " +
+          "at least 1 g fat); no sugar warning anywhere; the Foods tab shows the same badges",
         run(app) {
           const byId = (id) => foods.find((f) => f.id === id);
           const fiberExpected = {
@@ -770,9 +772,9 @@
             rice: "low", keso: "low", tuna_can: "low",
           };
           const warningsExpected = {
-            prastost: ["satFat"], keso: ["satFat", "sugar"], barebells: ["satFat"], milk: ["satFat", "sugar"],
-            banana: ["sugar"], apple: ["sugar"],
-            greek_0: ["sugar"], // 0.2 g fat is under 1 g, so no saturated fat warning; its sugar is lactose
+            prastost: ["satFat"], keso: ["satFat"], barebells: ["satFat"], milk: ["satFat"],
+            banana: [], apple: [], // sugary, but there's no sugar warning any more
+            greek_0: [], // 0.2 g fat is under 1 g, so no saturated fat warning
             oats: [], pasta: [], tuna_can: [], lentils_red: [],
           };
           const checks = [];
@@ -791,6 +793,11 @@
             return !fiberOk || li.querySelectorAll(".badge.warn").length !== Optimizer.nutrientWarnings(f).length;
           });
           checks.push([`Foods tab badges match for all foods` + (wrong.length ? ` (wrong: ${wrong.length})` : ""), wrong.length === 0]);
+          // The sugar warning is gone everywhere: from the rules and from the page (sugarPer100g stays in the data)
+          const sugarWarned = foods.filter((f) => Optimizer.nutrientWarnings(f).includes("sugar"));
+          checks.push([`no food gets a sugar warning` + (sugarWarned.length ? ` (got: ${sugarWarned.map((f) => f.id).join(", ")})` : ""), sugarWarned.length === 0]);
+          checks.push(["the page never shows \"⚠ Sugar\"", !/⚠\s*Sugar/i.test(app.document.body.textContent)]);
+          checks.push(["sugarPer100g is still in the data for every food", foods.every((f) => typeof f.sugarPer100g === "number")]);
           const flagged = foods.filter((f) => Optimizer.nutrientWarnings(f).length);
           return {
             checks,
@@ -799,16 +806,19 @@
         },
       },
       {
-        title: "Macro view on the List tab",
+        title: "Macro view on the Macros tab",
         expected:
-          "Pie of protein / carbs / fat (% of energy, adds up to 100%) with grams per day; the Monthly toggle shows grams × days; " +
+          "Pie of protein / carbs / fat / fibre (% of kcal, adds up to 100%); a table with grams, kcal (protein ×4, carbs ×4, " +
+          "fat ×9, fibre ×2) and % of kcal, plus a total kcal row; the Monthly toggle shows grams and kcal × days; " +
           "fibre vs 25–35 g, fat vs 25–40% and carbs vs 45–60% are green inside and yellow outside the range",
         async run(app) {
           const page = await pagePlansOnce(app);
-          const plan = scenarios.three().cheapest; // the List tab shows this plan after the card tap
+          const plan = scenarios.three().cheapest; // the Macros tab shows this plan after the card tap
           const t = plan.totals;
-          const share = plan.quality.macroKcalShare;
-          const g = (n) => `${Math.round(n).toLocaleString("en-GB")} g`;
+          const q = plan.quality;
+          const share = q.macroKcalShare;
+          const whole = (n) => Math.round(n).toLocaleString("en-GB");
+          const g = (n) => `${whole(n)} g`;
           const day = page.macroDay;
           const month = page.macroMonth;
           const pctSum = day.pcts.reduce((s, p) => s + parseFloat(p), 0);
@@ -816,6 +826,15 @@
           // Recalculate the plan's grams per day from its items, to check the optimizer's totals
           const sumOf = (field) => plan.items.reduce((s, i) => s + (foodOf(i)[field] * i.gramsPerDay) / 100, 0);
           const totalsOk = ["carbs", "fat", "fiber"].every((n) => Math.abs(sumOf(n + "Per100g") - t[n + "PerDay"]) < 1e-6);
+
+          // kcal per macro worked out here from the grams, in the table's order
+          const grams = [t.proteinPerDay, t.carbsPerDay, t.fatPerDay, t.fiberPerDay];
+          const kcal = [grams[0] * 4, grams[1] * 4, grams[2] * 9, grams[3] * 2];
+          const total = kcal.reduce((s, k) => s + k, 0);
+          const kcalOk =
+            ["protein", "carbs", "fat", "fiber"].every((m, i) => Math.abs(q.macroKcal[m] - kcal[i]) < 1e-6) &&
+            Math.abs(q.macroKcalTotal - total) < 1e-6 &&
+            Math.abs(share.fat - kcal[2] / total) < 1e-9;
 
           // Which ranges should be green
           const inside = (v, lo, hi) => v >= lo && v <= hi;
@@ -825,30 +844,68 @@
             ["Carbs", inside(share.carbs, 0.45, 0.6)],
           ];
           const shownRanges = day.ranges.map((r) => [r.name, r.inRange]);
+          const shareSum = share.protein + share.carbs + share.fat + share.fiber;
           return {
             checks: [
               ["optimizer's carbs, fat and fibre totals match the plan's foods", totalsOk],
-              [`optimizer's macro shares add up to 100% (${pct(share.protein + share.carbs + share.fat)})`, Math.abs(share.protein + share.carbs + share.fat - 1) < 1e-9],
-              ["pie is drawn with a CSS conic gradient", /conic-gradient/.test(day.pieStyle)],
-              [`pie legend %: ${day.pcts.join(" / ")} (adds up to ${pctSum}%)`, day.pcts.length === 3 && pctSum >= 99 && pctSum <= 101],
+              ["optimizer's kcal per macro = grams × 4 / 4 / 9 / 2, and the shares are of their total", kcalOk],
+              [`optimizer's macro shares add up to 100% (${pct(shareSum)})`, Math.abs(shareSum - 1) < 1e-9],
+              ["pie is drawn with a CSS conic gradient with 4 slices", /conic-gradient/.test(day.pieStyle) && (day.pieStyle.match(/var\(--macro-/g) || []).length === 4],
+              [`table rows: ${day.rows.join(", ")}`, day.rows.join() === "protein,carbs,fat,fiber"],
+              [`% of kcal: ${day.pcts.join(" / ")} (adds up to ${pctSum}%)`, day.pcts.length === 4 && pctSum >= 99 && pctSum <= 101],
               ["Daily is selected first", day.pressed === "day"],
-              [`daily grams: ${day.grams.join(", ")}`,
-                day.grams.join() === [t.proteinPerDay, t.carbsPerDay, t.fatPerDay, t.fiberPerDay].map(g).join()],
+              [`daily grams: ${day.grams.join(", ")}`, day.grams.join() === grams.map(g).join()],
+              [`daily kcal: ${day.kcal.join(", ")}`, day.kcal.join() === kcal.map(whole).join()],
+              [`daily total: ${day.total} kcal`, day.total === whole(total)],
               ["Monthly is selected after tapping it", month.pressed === "month"],
-              [`monthly grams (× ${DEFAULTS.days}): ${month.grams.join(", ")}`,
-                month.grams.join() === [t.proteinPerDay, t.carbsPerDay, t.fatPerDay, t.fiberPerDay].map((n) => g(n * DEFAULTS.days)).join()],
+              [`monthly grams (× ${DEFAULTS.days}): ${month.grams.join(", ")}`, month.grams.join() === grams.map((n) => g(n * DEFAULTS.days)).join()],
+              [`monthly kcal: ${month.kcal.join(", ")}`, month.kcal.join() === kcal.map((n) => whole(n * DEFAULTS.days)).join()],
+              [`monthly total: ${month.total} kcal`, month.total === whole(total * DEFAULTS.days)],
+              ["% of kcal stays the same when Monthly is on", month.pcts.join() === day.pcts.join()],
               [`range colours: ${shownRanges.map(([n, ok]) => `${n} ${ok ? "green" : "yellow"}`).join(", ")}`,
                 JSON.stringify(shownRanges) === JSON.stringify(expectedRanges)],
             ],
             notes: [
-              `Absolute cheapest plan: ${fmt(t.fiberPerDay)} g fibre/day, fat ${pct(share.fat)}, carbs ${pct(share.carbs)} of energy.`,
+              `Absolute cheapest plan: ${fmt(t.fiberPerDay)} g fibre/day, fat ${pct(share.fat)}, carbs ${pct(share.carbs)} of kcal; ` +
+                `total ${fmt(total)} kcal from macros vs ${fmt(t.kcalPerDay)} kcal from labels.`,
             ],
           };
         },
       },
+      {
+        title: "Macros tab: its own tab and a plan switcher",
+        expected:
+          "Macros is the fifth tab (after List) with its own icon. A switcher with the three plans sits at the top; tapping a plan " +
+          "shows its macros, stays on the Macros tab, and selects that plan's card and grocery list too",
+        async run(app) {
+          const page = await pagePlansOnce(app);
+          const three = scenarios.three();
+          const whole = (n) => Math.round(n).toLocaleString("en-GB");
+          const sw = page.switcher;
+          const checks = [
+            [`tab bar order: ${page.tabOrder.join(", ")}`, page.tabOrder.join() === "settings,foods,plans,list,macros"],
+            ["Macros tab button has its own icon", page.macrosHasIcon],
+            [`switcher buttons: ${sw.buttons.join(", ")}`, sw.buttons.join() === THREE.join()],
+            [`switcher labels: ${sw.labels.join(" / ")}`, sw.labels.join() === THREE.map((k) => three[k].title).join()],
+            [`switcher starts on the plan tapped on Plans (${sw.pressedAtStart})`, sw.pressedAtStart === "cheapest"],
+            ["switcher buttons are at least 44 px tall", sw.heights.every((h) => h >= 44)],
+          ];
+          for (const tap of sw.taps) {
+            const p = three[tap.key];
+            checks.push(
+              [`tap ${p.title}: switcher shows it as selected`, tap.pressed === tap.key],
+              [`tap ${p.title}: still on the Macros tab (open: ${tap.tab})`, tap.tab === "macros"],
+              [`tap ${p.title}: total ${tap.total} kcal (optimizer: ${whole(p.quality.macroKcalTotal)})`, tap.total === whole(p.quality.macroKcalTotal)],
+              [`tap ${p.title}: its Plans card is selected too (${tap.card})`, tap.card === tap.key],
+              [`tap ${p.title}: List tab shows it ("${tap.listHeading}")`, tap.listHeading === p.title],
+            );
+          }
+          return { checks };
+        },
+      },
     ];
 
-    // The page run is shared by tests 22 and 25, so it only happens once
+    // The page run is shared by tests 22, 25 and 26, so it only happens once
     let pagePlansPromise = null;
     function pagePlansOnce(app) {
       if (!pagePlansPromise) pagePlansPromise = pagePlans(app);
@@ -886,6 +943,7 @@
           badges: detail.querySelectorAll(".grocery tbody .badge").length,
           total: total ? total.textContent : "",
           hasQuality: Boolean(detail.querySelector(".quality-bar .bar-part")) && /Protein quality/.test(detail.textContent),
+          hasMacros: Boolean(doc.querySelector("#panel-list .macro-pie, #panel-list .macro-table, #panel-list [data-macro-period]")),
         };
       };
       const selectedKey = () => (doc.querySelector('.plan-card[aria-pressed="true"]') || { dataset: {} }).dataset.key;
@@ -897,12 +955,14 @@
 
       try {
         // Tap each tab and see which panel is shown
-        const tabsShown = ["settings", "foods", "plans", "list"].map((name) => {
+        const tabsShown = ["settings", "foods", "plans", "list", "macros"].map((name) => {
           tapTab(name);
           return openTab();
         });
         // Tab buttons' height (the frame is hidden, so measure the CSS min-height instead of the layout)
         const tabHeights = [...doc.querySelectorAll(".tab-bar .tab")].map((t) => parseFloat(app.getComputedStyle(t).minHeight));
+        const tabOrder = [...doc.querySelectorAll(".tab-bar .tab")].map((t) => t.dataset.tab);
+        const macrosHasIcon = Boolean(doc.querySelector('.tab-bar [data-tab="macros"] svg'));
 
         // Default settings and every food ticked, so the page matches scenarios.three()
         setInput("budget", DEFAULTS.budget);
@@ -936,25 +996,51 @@
         doc.querySelector('.plan-card[data-key="cheapest"]').click();
         const afterTap = { ...readDetail(), selected: selectedKey(), tab: openTab(), savedTab: app.localStorage.getItem("pbp.tab") };
 
-        // The macro section of that plan: daily first, then after tapping "Monthly" (and back)
+        // Open the Macros tab for that plan: daily first, then after tapping "Monthly" (and back)
+        tapTab("macros");
+        const section = doc.getElementById("macro-section");
+        const texts = (selector) => [...section.querySelectorAll(selector)].map((e) => e.textContent.trim());
+        const pressedIn = (attr) => (section.querySelector(`[${attr}][aria-pressed="true"]`) || { dataset: {} });
         const readMacro = () => {
-          const section = doc.getElementById("macro-section");
           const pie = section.querySelector(".macro-pie");
           return {
             pieStyle: pie ? pie.getAttribute("style") : "",
-            pcts: [...section.querySelectorAll(".macro-pct")].map((e) => e.textContent).filter(Boolean),
-            grams: [...section.querySelectorAll(".macro-grams")].map((e) => e.textContent),
+            rows: [...section.querySelectorAll(".macro-table tbody tr")].map((r) => r.dataset.macro),
+            pcts: texts(".macro-table tbody .macro-pct"),
+            grams: texts(".macro-grams"),
+            kcal: texts(".macro-kcal"),
+            total: (section.querySelector(".macro-total") || {}).textContent,
             ranges: [...section.querySelectorAll(".range-row")].map((r) => ({
               name: r.querySelector(".range-name").textContent,
               inRange: r.classList.contains("in-range"),
             })),
-            pressed: (section.querySelector('[data-macro-period][aria-pressed="true"]') || { dataset: {} }).dataset.macroPeriod,
+            pressed: pressedIn("data-macro-period").dataset.macroPeriod,
           };
         };
         const macroDay = readMacro();
-        doc.querySelector('[data-macro-period="month"]').click();
+        section.querySelector('[data-macro-period="month"]').click();
         const macroMonth = readMacro();
-        doc.querySelector('[data-macro-period="day"]').click();
+        section.querySelector('[data-macro-period="day"]').click();
+
+        // The plan switcher at the top of the Macros tab: its buttons, then tap each of the other two plans
+        const switchButtons = () => [...section.querySelectorAll(".plan-switch [data-macro-plan]")];
+        const switcher = {
+          buttons: switchButtons().map((b) => b.dataset.macroPlan),
+          labels: switchButtons().map((b) => b.textContent.trim()),
+          heights: switchButtons().map((b) => parseFloat(app.getComputedStyle(b).minHeight)),
+          pressedAtStart: pressedIn("data-macro-plan").dataset.macroPlan,
+          taps: ["realistic", "highQuality"].map((key) => {
+            section.querySelector(`[data-macro-plan="${key}"]`).click();
+            return {
+              key,
+              pressed: pressedIn("data-macro-plan").dataset.macroPlan,
+              tab: openTab(),
+              total: (section.querySelector(".macro-total") || {}).textContent,
+              card: selectedKey(),
+              listHeading: readDetail().heading,
+            };
+          }),
+        };
 
         // Change a setting: the dot and the "out of date" note should appear
         setInput("protein", DEFAULTS.protein + 1);
@@ -964,6 +1050,7 @@
         return {
           tabsShown, tabHeights, tabAfterRun, cards: cards.map((c) => c.dataset.key), cardsHaveStats,
           selectedAtStart, first, afterTap, dotBefore, dotAfter, staleShown, macroDay, macroMonth,
+          tabOrder, macrosHasIcon, switcher,
         };
       } finally {
         // Put the user's own saved settings and ticks back

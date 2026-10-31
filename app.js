@@ -120,10 +120,9 @@ const RATING_ORDER = { excellent: 0, ok: 1, poor: 2 };
 const RATING_LABELS = { excellent: "Excellent", ok: "OK", poor: "Poor" };
 // Text for the fibre badges and the nutrient warnings (PLAN.md section 4.5)
 const FIBER_LABELS = { high: "High fibre", source: "Fibre source", low: "Low fibre" };
-const WARNING_LABELS = { satFat: "⚠ Sat. fat", sugar: "⚠ Sugar" };
+const WARNING_LABELS = { satFat: "⚠ Sat. fat" };
 const WARNING_TITLES = {
   satFat: "Saturated fat is more than a third of the fat",
-  sugar: "Sugar is more than a third of the carbs",
 };
 
 // The small fibre badge and any warning badges for one food (shown after the protein badge)
@@ -328,43 +327,83 @@ function rangeRowHtml(label, value, range, text, rangeText) {
     </li>`;
 }
 
-// Build the macro section for one plan: pie chart, grams, daily/monthly toggle and ranges
+// The four macros on the Macros tab: key (matches the optimizer's names), label and kcal per gram
+const MACROS = [
+  { key: "protein", label: "Protein", kcalPerGram: 4 },
+  { key: "carbs", label: "Carbs", kcalPerGram: 4 },
+  { key: "fat", label: "Fat", kcalPerGram: 9 },
+  { key: "fiber", label: "Fibre", kcalPerGram: 2 },
+];
+
+// Small switcher at the top of the Macros tab: one button per plan, the selected one filled
+function planSwitchHtml() {
+  const buttons = PLAN_ORDER.map((key) =>
+    `<button type="button" data-macro-plan="${key}" aria-pressed="${key === selectedPlan}">${esc(plans[key].title)}</button>`)
+    .join("");
+  return `<div class="plan-switch" role="group" aria-label="Plan">${buttons}</div>`;
+}
+
+// Build the Macros tab for one plan: plan switcher, Daily/Monthly toggle, pie, table and ranges
 function macroHtml(plan) {
+  const switcher = planSwitchHtml();
+
+  // No plan: the switcher stays so you can pick another one, plus the reasons
+  if (plan.status !== "optimal") {
+    return `
+      <h2>Macros</h2>
+      ${switcher}
+      <p class="warning">${esc(plan.title)}: not possible.</p>
+      <ul class="messages">${plan.messages.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>`;
+  }
+
   const t = plan.totals;
+  const kcal = plan.quality.macroKcal;
   const share = plan.quality.macroKcalShare;
   const days = readSettingsFromForm().days;
 
-  // Daily or monthly grams
+  // Daily or monthly amounts (grams and kcal); the % don't change
   const factor = macroPeriod === "month" ? days : 1;
   const period = macroPeriod === "month" ? `for ${num(days)} days` : "per day";
-  const grams = (perDay) => `${num(perDay * factor)} g`;
+  const gramsPerDay = { protein: t.proteinPerDay, carbs: t.carbsPerDay, fat: t.fatPerDay, fiber: t.fiberPerDay };
 
-  // Pie chart: a CSS conic gradient with one slice per macro (no chart library)
-  const p = share.protein * 100;
-  const pc = (share.protein + share.carbs) * 100;
+  // Pie chart: a CSS conic gradient with one slice per macro (no chart library).
+  // Each slice runs from where the previous one ended to that point plus its share.
+  let from = 0;
+  const slices = MACROS.map((m) => {
+    const to = from + share[m.key] * 100;
+    const slice = `var(--macro-${m.key}) ${from.toFixed(1)}% ${to.toFixed(1)}%`;
+    from = to;
+    return slice;
+  });
   const pie = `
     <div class="macro-pie" role="img"
-      aria-label="Energy from protein ${pct(share.protein)}, carbs ${pct(share.carbs)}, fat ${pct(share.fat)}"
-      style="background: conic-gradient(var(--macro-protein) 0 ${p.toFixed(1)}%, var(--macro-carbs) ${p.toFixed(1)}% ${pc.toFixed(1)}%, var(--macro-fat) ${pc.toFixed(1)}% 100%)"></div>`;
+      aria-label="${MACROS.map((m) => `${m.label} ${pct(share[m.key])}`).join(", ")} of the energy"
+      style="background: conic-gradient(${slices.join(", ")})"></div>`;
 
-  // Legend: colour, name, % of energy and grams
-  const legendRow = (key, label, perDay) => `
-    <li><span class="swatch ${key}"></span><span class="macro-name">${label}</span>
-      <span class="macro-pct">${pct(share[key])}</span><span class="macro-grams">${grams(perDay)}</span></li>`;
-  const legend = `
-    <ul class="macro-legend">
-      ${legendRow("protein", "Protein", t.proteinPerDay)}
-      ${legendRow("carbs", "Carbs", t.carbsPerDay)}
-      ${legendRow("fat", "Fat", t.fatPerDay)}
-      <li><span class="swatch fiber"></span><span class="macro-name">Fibre</span>
-        <span class="macro-pct"></span><span class="macro-grams">${grams(t.fiberPerDay)}</span></li>
-    </ul>`;
+  // Table: one row per macro with grams, kcal (grams × kcal per gram) and % of the kcal, then the total
+  const rows = MACROS.map((m) => `
+      <tr data-macro="${m.key}">
+        <th scope="row"><span class="swatch ${m.key}"></span>${m.label} <span class="muted">×${m.kcalPerGram}</span></th>
+        <td class="num macro-grams">${num(gramsPerDay[m.key] * factor)} g</td>
+        <td class="num macro-kcal">${num(kcal[m.key] * factor)}</td>
+        <td class="num macro-pct">${pct(share[m.key])}</td>
+      </tr>`).join("");
+  const table = `
+    <table class="macro-table">
+      <thead>
+        <tr><th scope="col">Macro</th><th scope="col" class="num">Grams</th><th scope="col" class="num">kcal</th><th scope="col" class="num">% kcal</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><th scope="row">Total</th><td></td><td class="num macro-total">${num(plan.quality.macroKcalTotal * factor)}</td><td class="num">100%</td></tr>
+      </tfoot>
+    </table>`;
 
   // Daily / monthly toggle (two buttons; the pressed one is highlighted)
   const toggleButton = (value, label) =>
     `<button type="button" data-macro-period="${value}" aria-pressed="${macroPeriod === value}">${label}</button>`;
   const toggle = `
-    <div class="toggle" role="group" aria-label="Show grams">
+    <div class="toggle" role="group" aria-label="Show amounts">
       ${toggleButton("day", "Daily")}${toggleButton("month", "Monthly")}
     </div>`;
 
@@ -377,11 +416,18 @@ function macroHtml(plan) {
     </ul>`;
 
   return `
-    <h3>Macros</h3>
-    <p class="hint">Share of the energy from protein, carbs and fat (the three add up to 100%); grams ${period}.</p>
+    <h2>Macros</h2>
+    ${switcher}
+    <p class="hint">${esc(plan.title)}: grams and kcal ${period}. kcal = grams × 4 for protein and carbs, × 9 for fat, × 2 for fibre.</p>
     ${toggle}
-    <div class="macro-row">${pie}${legend}</div>
+    <div class="macro-row">${pie}${table}</div>
+    <p class="hint">The plan card's ${num(t.kcalPerDay)} kcal/day comes from the food labels, so it can differ a little from this total.</p>
     ${ranges}`;
+}
+
+// Draw the Macros tab for the selected plan
+function renderMacros() {
+  document.getElementById("macro-section").innerHTML = macroHtml(plans[selectedPlan]);
 }
 
 // Build the grocery table for one plan: food, badge, grams per day, packages, cost
@@ -433,19 +479,21 @@ function renderPlanDetail() {
     <p class="top-line"><strong>Total ${costLine(plan)}</strong> · <strong>${num(t.proteinPerDay)} g protein/day</strong> · <strong>${num(t.kcalPerDay)} kcal/day</strong></p>
     ${messages}
     ${groceryTableHtml(plan)}
-    ${proteinQualityHtml(plan)}
-    <div id="macro-section">${macroHtml(plan)}</div>`;
+    ${proteinQualityHtml(plan)}`;
 }
 
-// Draw the three cards (Plans tab) and the selected plan (List tab)
+// Draw the three cards (Plans tab) and the selected plan (List and Macros tabs)
 function renderPlans() {
   document.getElementById("plan-cards").innerHTML = PLAN_ORDER.map((key) => planCardHtml(plans[key])).join("");
   renderPlanDetail();
+  renderMacros();
   // Swap the "nothing yet" texts for the real content
   document.getElementById("plans-empty").hidden = true;
   document.getElementById("plans").hidden = false;
   document.getElementById("list-empty").hidden = true;
   document.getElementById("plan-detail").hidden = false;
+  document.getElementById("macros-empty").hidden = true;
+  document.getElementById("macro-section").hidden = false;
   // The plans are fresh again: no "out of date" note or dot
   document.getElementById("plans-stale").hidden = true;
   document.getElementById("plans-dot").hidden = true;
@@ -491,7 +539,7 @@ async function makeGroceryList() {
   }
 }
 
-// A card was tapped: select it and open its grocery list on the List tab
+// Select a plan (from a card or the Macros tab switcher) and redraw the List and Macros tabs
 function selectPlan(key) {
   selectedPlan = key;
   // Update the highlighted card without redrawing everything
@@ -501,7 +549,7 @@ function selectPlan(key) {
     card.setAttribute("aria-pressed", String(isSelected));
   }
   renderPlanDetail();
-  showTab("list", { toTop: true });
+  renderMacros();
 }
 
 // Settings or ticks changed after a list was made: show the "out of date"
@@ -517,8 +565,8 @@ function markPlansStale() {
 // Key used to remember the last open tab
 const TAB_KEY = "pbp.tab";
 
-// The four tabs, in the order of the tab bar
-const TABS = ["settings", "foods", "plans", "list"];
+// The five tabs, in the order of the tab bar
+const TABS = ["settings", "foods", "plans", "list", "macros"];
 
 // Where each tab was scrolled to, so coming back to e.g. Foods keeps your place
 const tabScroll = {};
@@ -601,18 +649,26 @@ function init() {
   // "Make my grocery list" runs the optimizer
   document.getElementById("make-list").addEventListener("click", makeGroceryList);
 
-  // A plan card was tapped (one listener for all three cards)
+  // A plan card was tapped (one listener for all three cards): select it and open its grocery list
   document.getElementById("plan-cards").addEventListener("click", (event) => {
     const card = event.target.closest(".plan-card");
-    if (card) selectPlan(card.dataset.key);
+    if (!card) return;
+    selectPlan(card.dataset.key);
+    showTab("list", { toTop: true });
   });
 
-  // Daily / monthly toggle in the macro section: redraw just that section
-  document.getElementById("plan-detail").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-macro-period]");
-    if (!button) return;
-    macroPeriod = button.dataset.macroPeriod;
-    document.getElementById("macro-section").innerHTML = macroHtml(plans[selectedPlan]);
+  // Macros tab: the plan switcher selects another plan (and stays on Macros);
+  // the Daily / Monthly toggle redraws the section with the new period
+  document.getElementById("macro-section").addEventListener("click", (event) => {
+    const planButton = event.target.closest("[data-macro-plan]");
+    if (planButton) {
+      selectPlan(planButton.dataset.macroPlan);
+      return;
+    }
+    const periodButton = event.target.closest("[data-macro-period]");
+    if (!periodButton) return;
+    macroPeriod = periodButton.dataset.macroPeriod;
+    renderMacros();
   });
 
   // A tab in the tab bar was tapped

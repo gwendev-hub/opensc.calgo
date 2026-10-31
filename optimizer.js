@@ -50,15 +50,13 @@ const Optimizer = (() => {
   // so e.g. 0.2 g fat in Greek yoghurt 0% isn't flagged for saturated fat
   const WARNING_MIN_GRAMS = 1;
 
-  // Nutrient warnings per food (PLAN.md section 4.5). Returns a list, e.g. ["satFat", "sugar"]:
+  // Nutrient warnings per food (PLAN.md section 4.5). Returns a list, e.g. ["satFat"]:
   //   "satFat" – saturated fat is more than ⅓ of the fat
-  //   "sugar"  – sugar is more than ⅓ of the carbs
+  // (sugarPer100g stays in the data, but there's no sugar warning any more)
   function nutrientWarnings(f) {
     const warnings = [];
     const fat = f.fatPer100g || 0;
-    const carbs = f.carbsPer100g || 0;
     if (fat >= WARNING_MIN_GRAMS && (f.saturatedFatPer100g || 0) > fat / 3) warnings.push("satFat");
-    if (carbs >= WARNING_MIN_GRAMS && (f.sugarPer100g || 0) > carbs / 3) warnings.push("sugar");
     return warnings;
   }
 
@@ -299,12 +297,17 @@ const Optimizer = (() => {
       }
     }
 
-    // Macro shares of energy for the pie chart: protein and carbs 4 kcal/g, fat 9 kcal/g.
-    // They're shares of the energy from these three, so they always add up to 100%.
-    const macroKcal = { protein: proteinPerDay * 4, carbs: nutrients.carbs * 4, fat: nutrients.fat * 9 };
-    const macroTotal = macroKcal.protein + macroKcal.carbs + macroKcal.fat;
+    // Energy per day from each macro for the Macros tab: protein and carbs 4 kcal/g,
+    // fat 9 kcal/g, fibre 2 kcal/g. The shares are of the total of these four, so they add up to 100%.
+    const macroKcal = {
+      protein: proteinPerDay * 4,
+      carbs: nutrients.carbs * 4,
+      fat: nutrients.fat * 9,
+      fiber: nutrients.fiber * 2,
+    };
+    const macroKcalTotal = Object.values(macroKcal).reduce((sum, k) => sum + k, 0);
     const macroKcalShare = {};
-    for (const m of Object.keys(macroKcal)) macroKcalShare[m] = macroTotal > 0 ? macroKcal[m] / macroTotal : 0;
+    for (const m of Object.keys(macroKcal)) macroKcalShare[m] = macroKcalTotal > 0 ? macroKcal[m] / macroKcalTotal : 0;
 
     // Shares as fractions (0–1) of total protein and total kcal
     const proteinShare = {};
@@ -338,7 +341,9 @@ const Optimizer = (() => {
         kcalShare,
         // % of calories that come from protein (4 kcal per gram)
         proteinKcalShare: kcalPerDay > 0 ? (proteinPerDay * 4) / kcalPerDay : 0,
-        // Protein / carbs / fat as shares of their combined energy (for the macro pie)
+        // kcal per day from protein / carbs / fat / fibre, their total, and each one's share (Macros tab)
+        macroKcal,
+        macroKcalTotal,
         macroKcalShare,
       },
     };

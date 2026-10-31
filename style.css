@@ -517,7 +517,7 @@ button.secondary {
 .badge.fiber-low    { background: #eeeeea; color: var(--muted); font-weight: normal; }
 .badge.warn         { background: #fbefc4; color: #7a5a00; }
 
-/* ---------- Macros (List tab) ---------- */
+/* ---------- Macros (Macros tab) ---------- */
 
 /* Daily / Monthly switch: two joined buttons */
 .toggle {
@@ -546,7 +546,7 @@ button.secondary {
   background: var(--accent);
 }
 
-/* Pie and legend side by side (they wrap on a very narrow screen) */
+/* Pie and table side by side (they wrap on a very narrow screen) */
 .macro-row {
   display: flex;
   flex-wrap: wrap;
@@ -562,33 +562,69 @@ button.secondary {
   border-radius: 50%;
 }
 
-.macro-legend {
+/* Table next to the pie: macro, grams, kcal, % of kcal, and a total row */
+.macro-table {
   flex: 1;
-  min-width: 180px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-/* One legend row: swatch, name, %, grams */
-.macro-legend li {
-  display: grid;
-  grid-template-columns: 14px 1fr auto auto;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 0;
+  min-width: 220px;
+  border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
 
-.macro-pct,
-.macro-grams {
+.macro-table th,
+.macro-table td {
+  padding: 5px 4px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.macro-table tbody th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.macro-table .num {
   text-align: right;
   white-space: nowrap;
 }
 
-/* Keep the grams lined up at the right edge */
-.macro-grams {
-  min-width: 4.2em;
+.macro-table tfoot th,
+.macro-table tfoot td {
+  font-weight: 700;
+  border-bottom: none;
+}
+
+/* Colour square in front of each macro name */
+.macro-table .swatch {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+/* Plan switcher at the top of the Macros tab: three equal buttons, the selected one filled */
+.plan-switch {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+
+.plan-switch button {
+  flex: 1;
+  min-height: 44px;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--accent);
+  background: var(--card);
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.plan-switch button[aria-pressed="true"] {
+  color: #fff;
+  background: var(--accent);
 }
 
 .swatch {

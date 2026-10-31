@@ -81,7 +81,7 @@
       </section>
     </div>
 
-    <!-- ===== Tab 4: List – the selected plan's grocery list and protein quality ===== -->
+    <!-- ===== Tab 4: List – the selected plan's grocery list and protein quality (macros are on tab 5) ===== -->
     <div id="panel-list" class="tab-panel" role="tabpanel" aria-labelledby="tab-list" hidden>
       <!-- Before the first run -->
       <section id="list-empty" class="card">
@@ -89,6 +89,16 @@
         <button type="button" class="secondary" data-go-tab="plans">Go to Plans</button>
       </section>
       <section id="plan-detail" class="card" aria-live="polite" hidden></section>
+    </div>
+
+    <!-- ===== Tab 5: Macros – pie, table and ranges for the selected plan, with a plan switcher ===== -->
+    <div id="panel-macros" class="tab-panel" role="tabpanel" aria-labelledby="tab-macros" hidden>
+      <!-- Before the first run -->
+      <section id="macros-empty" class="card">
+        <p class="hint">No macros yet. Make your plans on the Plans tab first.</p>
+        <button type="button" class="secondary" data-go-tab="plans">Go to Plans</button>
+      </section>
+      <section id="macro-section" class="card" aria-live="polite" hidden></section>
     </div>
   </main>
 
@@ -116,6 +126,11 @@
       <!-- Shopping basket icon -->
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18l-2 11H5L3 9zM8 9l3-6M16 9l-3-6M9 13v4M15 13v4"/></svg>
       <span class="tab-label">List</span>
+    </button>
+    <button type="button" class="tab" id="tab-macros" role="tab" aria-controls="panel-macros" aria-selected="false" data-tab="macros">
+      <!-- Pie chart icon -->
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9V3z"/><path d="M15 2.5A7 7 0 0 1 21.5 9H15V2.5z"/></svg>
+      <span class="tab-label">Macros</span>
     </button>
   </nav>
 
