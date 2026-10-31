@@ -40,6 +40,7 @@ Store-by-store prices, scraping or APIs, barcode scanning, accounts or sharing, 
 /app.js            – UI: render foods, read settings, show results
 /optimizer.js      – builds the model, calls the solver, rounds to packages
 /data/foods.json   – food data (nutrition + price)
+/data/groups.json  – food-group limits for plans 2 and 3 (see section 3)
 /test.html         – runs optimizer.js on fixed test cases (see section 8)
 /README.md         – what it is, how to run, how to edit foods.json
 /PLAN.md           – this file

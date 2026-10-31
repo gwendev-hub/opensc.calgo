@@ -56,8 +56,23 @@
       <!-- app.js fills this with one group per category -->
       <div id="food-list" aria-live="polite">Loading foods…</div>
     </section>
+
+    <!-- The big button that runs the optimizer (enabled once the food data has loaded) -->
+    <button type="button" id="make-list" class="primary" disabled>Make my grocery list</button>
+    <p id="plan-error" class="error" role="alert"></p>
+
+    <!-- Results: three comparison cards, then the selected plan (hidden until the first run) -->
+    <section id="plans" aria-labelledby="plans-title" hidden>
+      <h2 id="plans-title" class="section-title">Your plans</h2>
+      <p id="plans-stale" class="warning" hidden>You changed something. Tap “Make my grocery list” again to update.</p>
+      <div id="plan-cards" class="plan-cards"></div>
+      <section id="plan-detail" class="card" aria-live="polite"></section>
+    </section>
   </main>
 
+  <!-- The LP solver (pinned version), then the optimizer that uses it -->
+  <script src="https://cdn.jsdelivr.net/npm/javascript-lp-solver@0.4.24/prod/solver.js"></script>
+  <script src="optimizer.js"></script>
   <!-- Load the app logic last, so the HTML above already exists when it runs -->
   <script src="app.js"></script>
 </body>

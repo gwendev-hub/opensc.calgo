@@ -387,12 +387,18 @@
             const got = Optimizer.proteinRating(f);
             checks.push([`${id} = ${want} (optimizer.js says ${got})`, got === want]);
           }
-          // app.js has its own copy of the rule: it must agree on every food
-          const differ = foods.filter((f) => app.proteinRating(f) !== Optimizer.proteinRating(f));
+          // app.js must not have its own copy of the rule any more
+          checks.push(["app.js has no duplicate proteinRating (uses Optimizer.proteinRating)", typeof app.proteinRating === "undefined"]);
+          // Every badge on the real page must match the optimizer's rating
+          const badges = [...app.document.querySelectorAll("#food-list li")].map((li) => ({
+            id: li.querySelector("input").dataset.id,
+            rating: ["excellent", "ok", "poor"].find((r) => li.querySelector(".badge").classList.contains(r)),
+          }));
+          const wrong = badges.filter((b) => b.rating !== Optimizer.proteinRating(foods.find((f) => f.id === b.id)));
           checks.push([
-            `app.js and optimizer.js agree on all ${foods.length} foods` +
-              (differ.length ? ` (differ: ${differ.map((f) => f.id).join(", ")})` : ""),
-            differ.length === 0,
+            `page badges match Optimizer.proteinRating for all ${badges.length} foods` +
+              (wrong.length ? ` (wrong: ${wrong.map((b) => b.id).join(", ")})` : ""),
+            badges.length === foods.length && wrong.length === 0,
           ]);
           return { checks };
         },
@@ -685,7 +691,110 @@
           };
         },
       },
+      {
+        title: "Main page: button, plan cards and grocery list",
+        expected:
+          "With default settings and all foods ticked, the button shows 3 cards (Cheapest realistic selected), " +
+          "its grocery list and protein quality; tapping a card switches the list; changing a setting marks it out of date",
+        async run(app) {
+          const page = await pagePlans(app);
+          const three = scenarios.three();
+          const rowsOk = (key, rows) => three[key].status === "optimal" && rows === three[key].items.length;
+          return {
+            checks: [
+              [`cards: ${page.cards.join(", ")}`, page.cards.join() === THREE.join()],
+              [`selected by default: ${page.selectedAtStart}`, page.selectedAtStart === "realistic"],
+              [`each card shows cost vs budget, protein, kcal, % Excellent and food count`, page.cardsHaveStats],
+              [`list heading: "${page.first.heading}"`, page.first.heading === "Cheapest realistic"],
+              [`list has ${page.first.rows} foods (optimizer: ${three.realistic.items ? three.realistic.items.length : "–"})`, rowsOk("realistic", page.first.rows)],
+              ["every row has a rating badge", page.first.badges === page.first.rows],
+              [`total shown: ${page.first.total}`, page.first.total === `${Math.round(three.realistic.totals.shoppingCost).toLocaleString("en-GB")} kr`],
+              ["protein quality section with coloured bar", page.first.hasQuality],
+              [`after tapping Absolute cheapest: "${page.afterTap.heading}", ${page.afterTap.rows} foods`,
+                page.afterTap.heading === "Absolute cheapest" && rowsOk("cheapest", page.afterTap.rows)],
+              ["tapped card is now the selected one", page.afterTap.selected === "cheapest"],
+              ["changing a setting shows the 'out of date' note", page.staleShown],
+            ],
+            notes: ["Runs on the real index.html in a hidden frame; your own saved settings and ticks are put back afterwards."],
+          };
+        },
+      },
     ];
+
+    // Drive the real page in the hidden frame: default settings, tick every food,
+    // press the button, read the cards and list, tap a card, change a setting.
+    // The page saves settings and ticks in localStorage, so those are put back afterwards.
+    async function pagePlans(app) {
+      const doc = app.document;
+      const keys = ["pbp.settings", "pbp.ticks"];
+      const saved = keys.map((k) => app.localStorage.getItem(k));
+      const fire = (el, type) => el.dispatchEvent(new app.Event(type, { bubbles: true }));
+      const setInput = (id, value) => {
+        const input = doc.getElementById(id);
+        input.value = value;
+        fire(input, "input");
+      };
+      // Wait (up to 15 s) until a condition is true
+      const waitFor = async (condition) => {
+        const started = Date.now();
+        while (!condition()) {
+          if (Date.now() - started > 15000) throw new Error("the page didn't show the plans in time");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      };
+      // What the selected plan's list shows right now
+      const readDetail = () => {
+        const detail = doc.getElementById("plan-detail");
+        const total = detail.querySelector(".grocery tfoot td");
+        return {
+          heading: (detail.querySelector("h2") || {}).textContent,
+          rows: detail.querySelectorAll(".grocery tbody tr").length,
+          badges: detail.querySelectorAll(".grocery tbody .badge").length,
+          total: total ? total.textContent : "",
+          hasQuality: Boolean(detail.querySelector(".quality-bar .bar-part")) && /Protein quality/.test(detail.textContent),
+        };
+      };
+      const selectedKey = () => (doc.querySelector('.plan-card[aria-pressed="true"]') || { dataset: {} }).dataset.key;
+
+      try {
+        // Default settings and every food ticked, so the page matches scenarios.three()
+        setInput("budget", DEFAULTS.budget);
+        setInput("kcal", DEFAULTS.kcal);
+        setInput("protein", DEFAULTS.protein);
+        setInput("days", DEFAULTS.days);
+        for (const box of doc.querySelectorAll('#food-list input[type="checkbox"]')) {
+          if (!box.checked) {
+            box.checked = true;
+            fire(box, "change");
+          }
+        }
+
+        // Press the button and wait for the cards (the page itself re-enables the button when done)
+        doc.getElementById("make-list").click();
+        await waitFor(() => doc.querySelectorAll(".plan-card").length === 3 && !doc.getElementById("make-list").disabled);
+
+        const cards = [...doc.querySelectorAll(".plan-card")];
+        const cardsHaveStats = cards.every((c) =>
+          /[\d,]+ kr/.test(c.querySelector(".plan-cost").textContent) && /[\d,]+ kr budget/.test(c.textContent) &&
+          /g protein\/day/.test(c.textContent) &&
+          /kcal\/day/.test(c.textContent) && /protein from Excellent/.test(c.textContent) && /\d+ foods/.test(c.textContent));
+        const selectedAtStart = selectedKey();
+        const first = readDetail();
+
+        // Tap the "Absolute cheapest" card
+        doc.querySelector('.plan-card[data-key="cheapest"]').click();
+        const afterTap = { ...readDetail(), selected: selectedKey() };
+
+        // Change a setting: the "out of date" note should appear
+        setInput("protein", DEFAULTS.protein + 1);
+        const staleShown = !doc.getElementById("plans-stale").hidden;
+
+        return { cards: cards.map((c) => c.dataset.key), cardsHaveStats, selectedAtStart, first, afterTap, staleShown };
+      } finally {
+        // Put the user's own saved settings and ticks back
+        keys.forEach((k, i) => (saved[i] === null ? app.localStorage.removeItem(k) : app.localStorage.setItem(k, saved[i])));
+      }
+    }
 
     // Draw the three default plans next to each other
     function renderComparison() {
@@ -753,7 +862,7 @@
         const check = () => {
           const win = frame.contentWindow;
           const ready = win && win.document && win.document.querySelector("#food-list .food");
-          if (ready && typeof win.proteinRating === "function") return resolve(win);
+          if (ready && typeof win.liftsOrDilutes === "function") return resolve(win);
           if (Date.now() - started > 8000) return reject(new Error("index.html / app.js didn't load in the hidden frame"));
           setTimeout(check, 100);
         };

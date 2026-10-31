@@ -181,3 +181,190 @@ select {
 .error {
   color: #9b2a22;
 }
+
+/* Anything with the hidden attribute stays hidden, even if a rule below sets display */
+[hidden] {
+  display: none !important;
+}
+
+/* ---------- Make my grocery list ---------- */
+
+/* Big full-width green button, easy to hit with a thumb */
+button.primary {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 16px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+/* Greyed out while the data loads or the optimizer runs */
+button.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Heading above the plan cards (outside any card) */
+.section-title {
+  font-size: 1.2rem;
+  margin: 24px 0 8px;
+}
+
+/* Muted grey text, e.g. "of 4,000 kr" */
+.muted {
+  color: var(--muted);
+}
+
+/* Yellow note, e.g. "You changed something" or a Poor-food warning */
+.warning {
+  background: #fbefc4;
+  color: #5c4400;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+/* ---------- Plan cards ---------- */
+
+/* Phone: cards stacked on top of each other */
+.plan-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+/* Wider screens: three cards side by side */
+@media (min-width: 600px) {
+  .plan-cards {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Each card is a button: reset the browser's button look */
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 44px;
+  padding: 12px;
+  text-align: left;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+/* The selected card gets a green border and a light green background */
+.plan-card.selected {
+  border-color: var(--accent);
+  background: #eef7f1;
+}
+
+/* Keyboard focus is clearly visible */
+.plan-card:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.plan-title {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.plan-cost {
+  font-weight: 700;
+  font-size: 1.15rem;
+}
+
+/* Over budget / not possible in red, within budget in green */
+.over {
+  color: #9b2a22;
+  font-weight: 600;
+}
+
+.within {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ---------- Selected plan ---------- */
+
+/* "Total 1,352 kr of 4,000 kr ✔ · 115 g protein/day · 1,615 kcal/day" */
+.top-line {
+  margin: 0 0 12px;
+}
+
+/* Messages such as "over budget" or why a plan isn't possible */
+.messages {
+  margin: 0 0 12px;
+  padding-left: 20px;
+}
+
+/* Grocery list table: fits a phone screen, numbers right-aligned */
+.grocery {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.grocery th,
+.grocery td {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.grocery .num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.grocery tfoot th,
+.grocery tfoot td {
+  font-weight: 700;
+  border-bottom: none;
+}
+
+/* The badge sits after the food name; let long names wrap */
+.grocery .badge {
+  margin-left: 4px;
+}
+
+#plan-detail h3 {
+  font-size: 1.05rem;
+  margin: 20px 0 4px;
+}
+
+/* Protein quality bar: green, yellow and red parts side by side */
+.quality-bar {
+  display: flex;
+  height: 14px;
+  margin: 8px 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--border);
+}
+
+.bar-part.excellent { background: #2e9d5b; }
+.bar-part.ok        { background: #e0b300; }
+.bar-part.poor      { background: #d0453b; }
+
+/* The badges under the bar work as its legend */
+.legend {
+  margin: 0 0 8px;
+}
+
+.legend .badge {
+  margin: 0 4px 0 0;
+}
