@@ -36,6 +36,26 @@
         <input id="days" name="days" type="number" inputmode="numeric" min="1" max="62" step="1" value="30">
       </form>
     </section>
+
+    <!-- Foods card: tick the foods you'd eat. The list itself is built by app.js from data/foods.json -->
+    <section class="card" aria-labelledby="foods-title">
+      <h2 id="foods-title">Foods</h2>
+      <p class="hint">
+        Your targets need at least <strong id="target-density">–</strong> g protein per 100 kcal
+        on average across the whole plan.
+        Foods with more than 10 g protein per 100 kcal <em>lift</em> your plan; the rest <em>dilute</em> it.
+      </p>
+
+      <!-- How to order foods inside each category -->
+      <label for="food-sort">Sort by</label>
+      <select id="food-sort">
+        <option value="rating">Protein rating</option>
+        <option value="price">Price per 100 g protein</option>
+      </select>
+
+      <!-- app.js fills this with one group per category -->
+      <div id="food-list" aria-live="polite">Loading foods…</div>
+    </section>
   </main>
 
   <!-- Load the app logic last, so the HTML above already exists when it runs -->

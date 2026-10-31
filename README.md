@@ -16,6 +16,7 @@ It must work by opening index.html through GitHub Pages on a phone. Design mobil
 Food data lives in data/foods.json. Nutrition is per 100 g. Never hard-code foods in JavaScript.
 Wrap localStorage reads and writes in try/catch.
 Protein rating rule (PLAN.md section 4): protein × 10 > kcal = Excellent, ≥ kcal/2 = OK, otherwise Poor. Don't change this rule without asking.
+Lifts/dilutes rule (PLAN.md section 4.2): fixed threshold of 10 g protein per 100 kcal. More than 10 g lifts, 10 g or less dilutes. It does not depend on the settings. The personal target density (protein ÷ kcal × 100) is shown for information only and never decides lifts/dilutes.
 Testing
 test.html runs the optimizer test cases from PLAN.md section 8. Keep every test passing, and add a test for each new rule.
 To test locally, run python3 -m http.server in the project folder and open http://localhost:8000. Pages that load JSON don't work when opened straight from the file system.

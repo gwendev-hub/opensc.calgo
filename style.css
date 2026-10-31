@@ -82,3 +82,102 @@ input[type="number"]:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* Small explanatory text under a card heading */
+.hint {
+  color: var(--muted);
+  margin: 0;
+}
+
+/* Sort dropdown: same size as the number inputs so it's easy to tap */
+select {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 8px 12px;
+  font-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+}
+
+/* One heading per food category */
+.food-group h3 {
+  font-size: 1rem;
+  margin: 20px 0 4px;
+  color: var(--muted);
+}
+
+/* Remove the default bullet list styling */
+.food-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Each food row is one big label, so tapping anywhere ticks the box */
+.food {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 44px;
+  margin: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  font-weight: normal;
+  cursor: pointer;
+}
+
+/* Bigger checkbox for fingers */
+.food input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  margin: 2px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+/* Food name and its numbers stack on top of each other */
+.food-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.food-name {
+  font-weight: 600;
+}
+
+.food-stats {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* Unticked foods are faded so the ticked ones stand out */
+.food.unticked .food-info {
+  opacity: 0.5;
+}
+
+/* Coloured rating badges: green, yellow, red */
+.badge {
+  display: inline-block;
+  padding: 0 8px;
+  margin-left: 6px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.badge.excellent { background: #d6f0dd; color: #1d6b3a; }
+.badge.ok        { background: #fbefc4; color: #7a5a00; }
+.badge.poor      { background: #f8d7d5; color: #9b2a22; }
+
+/* "lifts" in green, "dilutes" in muted red */
+.lifts   { color: #1d6b3a; font-weight: 600; }
+.dilutes { color: #9b2a22; font-weight: 600; }
+
+/* Shown if foods.json can't be loaded */
+.error {
+  color: #9b2a22;
+}

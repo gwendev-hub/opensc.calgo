@@ -141,16 +141,18 @@ function proteinRating(f) {
 
 Poor doesn't mean a bad food. Rice, vegetables and oil are fine for calories and meals. They just shouldn't count as protein sources.
 
-### 4.2 Your personal threshold
-The targets themselves set a minimum protein density for the whole plan:
+### 4.2 Lifts / dilutes, and your personal target density
+**Lifts / dilutes uses a fixed threshold of 10 g protein per 100 kcal** (the same as `protein × 10 > kcal`). It does not depend on the settings:
+- **Lifts your plan:** more than 10 g protein per 100 kcal.
+- **Dilutes your plan:** 10 g or less per 100 kcal, so calories from it have to be balanced by denser foods elsewhere.
+
+**Personal target density (information only).** The targets set the average protein density the whole plan needs:
 
 `targetDensity = proteinMin / kcalTarget × 100` g protein per 100 kcal
 
-With 110 g and 1,700 kcal, that's **6.5 g per 100 kcal**. Every food is labelled relative to it:
-- **Lifts your plan:** the food is above your target density.
-- **Dilutes your plan:** the food is below it, so every calorie from it has to be made up by a denser food elsewhere.
+With 110 g and 1,700 kcal, that's **6.5 g per 100 kcal**. The page shows it as *"Your targets need at least 6.5 g protein per 100 kcal on average across the whole plan."* and updates it when protein or calories change. It never decides lifts/dilutes.
 
-Each food card shows the badge (Excellent/OK/Poor) and "lifts" or "dilutes" for this user's goals.
+Each food card shows the badge (Excellent/OK/Poor) and "lifts" or "dilutes".
 
 ### 4.3 How the optimizer uses the rating
 These become constraints in the model (section 5). Defaults are listed, and all of them can be changed under "Advanced":
@@ -208,7 +210,7 @@ Switch the variables to **whole packages per month**, using integer variables in
 ## 6. Screens (one page, mobile-first)
 
 1. **Settings card:** budget, kcal, protein, days. Large inputs with sensible defaults (4,000 kr, 1,700 kcal, 110 g, 30 days).
-2. **Foods list:** grouped by category, each food with a checkbox, its rating badge (green, yellow or red), protein per 100 kcal, "lifts/dilutes" for your targets, and kr per 100 g protein. Tapping a food opens its min/max fields (advanced, hidden by default).
+2. **Foods list:** grouped by category, each food with a checkbox, its rating badge (green, yellow or red), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. Tapping a food opens its min/max fields (advanced, hidden by default).
 3. **"Make my grocery list" button**
 4. **Result card:**
    - Top line: **Total 3,420 kr of 4,000 kr ✔** · **112 g protein/day** · **1,690 kcal/day**
@@ -226,7 +228,7 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 
 1. **Skeleton:** create `index.html`, `style.css`, `app.js` and `README.md`. The page shows a title and the settings card. Turn on GitHub Pages and confirm the page opens on the phone.
    *Done when:* the GitHub Pages link loads on the phone.
-2. **Food data and protein rating:** create `data/foods.json` with the starter list. Write `proteinRating()` and the target-density "lifts/dilutes" label (section 4). `app.js` renders the grouped checkbox list with badge, protein per 100 kcal and kr per 100 g protein, sortable by rating.
+2. **Food data and protein rating:** create `data/foods.json` with the starter list. Write `proteinRating()`, the fixed "lifts/dilutes" label and the target-density info line (section 4). `app.js` renders the grouped checkbox list with badge, protein per 100 kcal and kr per 100 g protein, sortable by rating.
    *Done when:* all foods show with the right badge (keso Excellent, eggs OK, peanut butter Poor), and ticks survive a reload.
 3. **Optimizer core:** write `optimizer.js` with `buildModel(settings, foods)` and `solve(model)`, using javascript-lp-solver, including the protein quality constraints. No UI yet. Create `test.html` with the test cases from section 8.
    *Done when:* all the tests pass in `test.html`.
@@ -254,7 +256,7 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 8 | Ratings | keso, kvarg, tuna, tofu = Excellent; eggs, lentils, salmon = OK; peanut butter, oats, rice = Poor |
 | 9 | Peanut butter, oats, lentils, rice + keso and tuna ticked | ≥ 60% of protein from Excellent foods; Poor foods ≤ 40% of kcal |
 | 10 | Only peanut butter, oats, lentils and rice ticked | Infeasible, with the "tick more Excellent protein foods" message |
-| 11 | Target density | 110 g / 1,700 kcal → 6.5 g per 100 kcal; keso "lifts", oats "dilutes" |
+| 11 | Lifts/dilutes and target density | Lifts/dilutes uses the fixed 10 g per 100 kcal: keso and tuna "lift"; eggs, lentils, chickpeas and oats "dilute". Target density 110 g / 1,700 kcal → 6.5 g per 100 kcal (info only); changing protein to 150 changes only the info line, no food's label |
 
 ---
 
