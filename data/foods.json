@@ -2,7 +2,9 @@
   {
     "id": "tuna_can",
     "name": "Canned tuna in water, drained",
+    "aliases": ["tuna", "tonfisk", "tonfisk i vatten", "canned fish", "fiskkonserv"],
     "category": "Fish & seafood",
+    "starter": true,
     "packGrams": 120,
     "packPrice": 18,
     "pieceGrams": 120,
@@ -21,6 +23,7 @@
   {
     "id": "tuna_frozen",
     "name": "Frozen tuna steak",
+    "aliases": ["tuna", "tonfisk", "tonfiskfilé", "fryst tonfisk", "frozen fish", "fryst fisk"],
     "category": "Fish & seafood",
     "packGrams": 250,
     "packPrice": 70,
@@ -39,6 +42,7 @@
   {
     "id": "salmon_frozen",
     "name": "Frozen salmon fillets",
+    "aliases": ["salmon", "lax", "laxfilé", "fryst lax", "fish", "fisk"],
     "category": "Fish & seafood",
     "packGrams": 500,
     "packPrice": 100,
@@ -57,7 +61,9 @@
   {
     "id": "cod_frozen",
     "name": "Frozen cod/saithe fillets",
+    "aliases": ["cod", "torsk", "saithe", "sej", "pollock", "white fish", "vitfisk", "fryst fisk", "fiskfilé"],
     "category": "Fish & seafood",
+    "starter": true,
     "packGrams": 600,
     "packPrice": 60,
     "pieceGrams": null,
@@ -75,6 +81,7 @@
   {
     "id": "shrimp_frozen",
     "name": "Frozen shrimp, peeled",
+    "aliases": ["shrimp", "prawns", "räkor", "skalade räkor", "frysta räkor"],
     "category": "Fish & seafood",
     "packGrams": 500,
     "packPrice": 80,
@@ -93,7 +100,9 @@
   {
     "id": "eggs",
     "name": "Eggs (12 × 60 g)",
+    "aliases": ["egg", "eggs", "ägg"],
     "category": "Eggs & dairy",
+    "starter": true,
     "packGrams": 720,
     "packPrice": 45,
     "pieceGrams": 60,
@@ -111,7 +120,9 @@
   {
     "id": "keso",
     "name": "Keso 4%",
+    "aliases": ["cottage cheese", "keso", "grynost"],
     "category": "Eggs & dairy",
+    "starter": true,
     "packGrams": 250,
     "packPrice": 22,
     "pieceGrams": null,
@@ -130,7 +141,9 @@
   {
     "id": "kvarg",
     "name": "Kvarg naturell",
+    "aliases": ["quark", "kvarg", "kesella"],
     "category": "Eggs & dairy",
+    "starter": true,
     "packGrams": 500,
     "packPrice": 30,
     "pieceGrams": null,
@@ -150,6 +163,7 @@
   {
     "id": "greek_0",
     "name": "Greek yoghurt 0%",
+    "aliases": ["greek yoghurt", "greek yogurt", "grekisk yoghurt", "turkisk yoghurt", "yoghurt", "yogurt", "fat-free yoghurt"],
     "category": "Eggs & dairy",
     "packGrams": 1000,
     "packPrice": 45,
@@ -169,6 +183,7 @@
   {
     "id": "drickkvarg",
     "name": "Lindahls drink 330 ml",
+    "aliases": ["drinkable quark", "drickkvarg", "kvargdryck", "lindahls", "protein drink", "proteindryck"],
     "category": "Eggs & dairy",
     "packGrams": 340,
     "packPrice": 24,
@@ -188,7 +203,9 @@
   {
     "id": "milk",
     "name": "Milk 1.5%",
+    "aliases": ["milk", "mjölk", "mellanmjölk", "semi-skimmed milk"],
     "category": "Eggs & dairy",
+    "starter": true,
     "packGrams": 1000,
     "packPrice": 15,
     "pieceGrams": null,
@@ -207,6 +224,7 @@
   {
     "id": "prastost",
     "name": "Hard cheese (prästost)",
+    "aliases": ["cheese", "ost", "hard cheese", "hårdost", "prästost", "hushållsost"],
     "category": "Eggs & dairy",
     "packGrams": 700,
     "packPrice": 85,
@@ -226,7 +244,9 @@
   {
     "id": "tofu",
     "name": "Firm tofu",
+    "aliases": ["tofu", "firm tofu", "fast tofu", "bean curd"],
     "category": "Plant protein",
+    "starter": true,
     "packGrams": 400,
     "packPrice": 30,
     "pieceGrams": null,
@@ -245,6 +265,7 @@
   {
     "id": "oumph",
     "name": "Oumph!",
+    "aliases": ["oumph", "soy chunks", "sojabitar", "vegokött", "plant-based meat"],
     "category": "Plant protein",
     "packGrams": 280,
     "packPrice": 40,
@@ -264,6 +285,7 @@
   {
     "id": "soy_mince",
     "name": "Soy mince, dry",
+    "aliases": ["soy mince", "sojafärs", "soja", "vegofärs", "tvp", "textured soy protein"],
     "category": "Plant protein",
     "packGrams": 250,
     "packPrice": 30,
@@ -282,7 +304,9 @@
   {
     "id": "lentils_red",
     "name": "Red lentils, dry",
+    "aliases": ["lentils", "red lentils", "linser", "röda linser"],
     "category": "Plant protein",
+    "starter": true,
     "packGrams": 500,
     "packPrice": 22,
     "pieceGrams": null,
@@ -300,6 +324,7 @@
   {
     "id": "chickpeas_can",
     "name": "Chickpeas, drained",
+    "aliases": ["chickpeas", "garbanzo beans", "kikärter", "kikärtor"],
     "category": "Plant protein",
     "packGrams": 230,
     "packPrice": 12,
@@ -318,6 +343,7 @@
   {
     "id": "beans_can",
     "name": "Kidney/white beans, drained",
+    "aliases": ["beans", "bönor", "kidney beans", "kidneybönor", "white beans", "vita bönor"],
     "category": "Plant protein",
     "packGrams": 230,
     "packPrice": 12,
@@ -336,7 +362,9 @@
   {
     "id": "oats",
     "name": "Oats",
+    "aliases": ["oats", "oatmeal", "porridge", "havregryn", "havre", "gröt"],
     "category": "Grains & bread",
+    "starter": true,
     "packGrams": 1500,
     "packPrice": 25,
     "pieceGrams": null,
@@ -355,7 +383,9 @@
   {
     "id": "rice",
     "name": "Rice, dry",
+    "aliases": ["rice", "ris", "jasmine rice", "jasminris", "basmati"],
     "category": "Grains & bread",
+    "starter": true,
     "packGrams": 1000,
     "packPrice": 30,
     "pieceGrams": null,
@@ -374,6 +404,7 @@
   {
     "id": "bulgur",
     "name": "Bulgur, dry",
+    "aliases": ["bulgur", "bulgurvete", "cracked wheat"],
     "category": "Grains & bread",
     "packGrams": 1000,
     "packPrice": 30,
@@ -393,7 +424,9 @@
   {
     "id": "pasta",
     "name": "Pasta, dry",
+    "aliases": ["pasta", "spaghetti", "macaroni", "makaroner", "penne"],
     "category": "Grains & bread",
+    "starter": true,
     "packGrams": 1000,
     "packPrice": 20,
     "pieceGrams": null,
@@ -412,7 +445,9 @@
   {
     "id": "potatoes",
     "name": "Potatoes",
+    "aliases": ["potato", "potatoes", "potatis"],
     "category": "Grains & bread",
+    "starter": true,
     "packGrams": 2000,
     "packPrice": 25,
     "pieceGrams": null,
@@ -430,7 +465,9 @@
   {
     "id": "bread",
     "name": "Wholegrain bread",
+    "aliases": ["bread", "wholemeal bread", "bröd", "fullkornsbröd", "limpa"],
     "category": "Grains & bread",
+    "starter": true,
     "packGrams": 500,
     "packPrice": 30,
     "pieceGrams": null,
@@ -448,6 +485,7 @@
   {
     "id": "honokaka",
     "name": "Hönökaka",
+    "aliases": ["hönökaka", "flatbread", "bread", "bröd", "tunnbröd"],
     "category": "Grains & bread",
     "packGrams": 240,
     "packPrice": 25,
@@ -466,7 +504,9 @@
   {
     "id": "veg_frozen",
     "name": "Frozen vegetable mix",
+    "aliases": ["vegetables", "veggies", "frozen vegetables", "grönsaker", "frysta grönsaker", "wokgrönsaker"],
     "category": "Fruit & veg",
+    "starter": true,
     "packGrams": 1000,
     "packPrice": 30,
     "pieceGrams": null,
@@ -484,6 +524,7 @@
   {
     "id": "tomatoes_can",
     "name": "Crushed tomatoes",
+    "aliases": ["tomatoes", "canned tomatoes", "passata", "tomater", "krossade tomater"],
     "category": "Fruit & veg",
     "packGrams": 400,
     "packPrice": 12,
@@ -502,7 +543,9 @@
   {
     "id": "banana",
     "name": "Bananas",
+    "aliases": ["banana", "bananas", "fruit", "banan", "bananer", "frukt"],
     "category": "Fruit & veg",
+    "starter": true,
     "packGrams": 1000,
     "packPrice": 25,
     "pieceGrams": null,
@@ -520,6 +563,7 @@
   {
     "id": "apple",
     "name": "Apples",
+    "aliases": ["apple", "apples", "fruit", "äpple", "äpplen", "frukt"],
     "category": "Fruit & veg",
     "packGrams": 1000,
     "packPrice": 30,
@@ -538,6 +582,7 @@
   {
     "id": "peanut_butter",
     "name": "Peanut butter",
+    "aliases": ["peanut butter", "nut butter", "jordnötssmör", "nötsmör"],
     "category": "Snacks & fats",
     "packGrams": 350,
     "packPrice": 35,
@@ -557,6 +602,7 @@
   {
     "id": "barebells",
     "name": "Barebells bar 55 g",
+    "aliases": ["barebells", "protein bar", "proteinbar", "bar"],
     "category": "Snacks & fats",
     "packGrams": 55,
     "packPrice": 23,
@@ -575,6 +621,7 @@
   {
     "id": "quest_chips",
     "name": "Quest protein chips 32 g",
+    "aliases": ["quest", "protein chips", "proteinchips", "chips"],
     "category": "Snacks & fats",
     "packGrams": 32,
     "packPrice": 29,
@@ -593,6 +640,7 @@
   {
     "id": "oil",
     "name": "Rapeseed oil",
+    "aliases": ["oil", "rapeseed oil", "canola oil", "cooking oil", "olja", "rapsolja", "matolja"],
     "category": "Snacks & fats",
     "packGrams": 900,
     "packPrice": 30,

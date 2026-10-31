@@ -1,6 +1,6 @@
 # Protein Budget Planner – Version 0 plan
 
-**Goal of v0:** a single web page I can open on my phone. I set a budget, calorie target and protein target, tick the foods I'm willing to eat, and get the **cheapest monthly grocery list** that meets my targets, or a clear message about how far off I am.
+**Goal of v0:** a single web page I can open on my phone. I set a budget, calorie target and protein target, pick the foods I'm willing to eat, and get the **cheapest monthly grocery list** that meets my targets, or a clear message about how far off I am.
 
 **Who uses it:** me and 3–5 friends. No accounts, no server, no scraping.
 
@@ -12,11 +12,11 @@
 
 ### In v0
 1. **Settings:** monthly budget (kr), daily calories (kcal), daily protein minimum (g), days in the period (default 30).
-2. **Food list:** about 30 Swedish foods. Tick the ones you'd eat. Optionally set a min and max amount per food.
+2. **Food list:** about 30 Swedish foods. Search and add the ones you'd eat to **My foods**. Optionally set a min and max amount per food.
 3. **Protein quality rating (core feature, see section 4):** every food is rated Excellent, OK or Poor as a protein source. The optimizer uses the rating, so calorie-dense foods like peanut butter, oats or lentils can't fill the plan with calories instead of protein.
 4. **Optimizer:** finds the cheapest combination that meets the targets and the protein quality rules.
 5. **Result:** a grocery list (packages to buy, cost per item), the total cost compared with the budget, the daily kcal and protein actually reached, and a protein quality breakdown.
-6. **Saved on the phone:** settings and ticks are kept in `localStorage`, so they're still there next time.
+6. **Saved on the phone:** settings and My foods are kept in `localStorage`, so they're still there next time.
 
 ### Not in v0 (later, if feedback asks for it)
 Store-by-store prices, scraping or APIs, barcode scanning, accounts or sharing, meal plans or recipes, fat/carb/fibre targets, weekly lists, tick-off shopping mode.
@@ -56,7 +56,9 @@ Everything is stored **per 100 g**, so all foods can be compared. Foods sold by 
 {
   "id": "keso",
   "name": "Keso cottage cheese 4%",
+  "aliases": ["cottage cheese", "keso", "grynost"],
   "category": "Dairy",
+  "starter": true,
   "packGrams": 250,
   "packPrice": 22,
   "pieceGrams": null,
@@ -101,6 +103,16 @@ Only some foods have these. Plan 1 ignores them.
 | `realisticMaxGramsPerDay` | A stricter max per day for plans 2 and 3. Plan 1 keeps `maxGramsPerDay`. A user's own max always wins. | tofu 150, canned tuna 120, Oumph 150, kvarg 300 |
 | `minGramsIfUsed` | The floor if the food is in plan 2 or 3 at all (0 or at least this many grams). Without it the floor is 35 g. | oil 10, peanut butter 10 |
 | `limitGroup` | The id of a food group in `data/groups.json` whose total limit this food counts towards. | dairy: keso, kvarg, Greek yoghurt, Lindahls drink, milk, prästost · dry_grains: rice, pasta, bulgur, oats |
+
+### Search aliases and the starter set
+Every food has these two fields, used by the Foods tab (section 6). The optimizer ignores them.
+
+| Field | Meaning |
+|---|---|
+| `aliases` | Other names to search by, in **Swedish and English**, e.g. keso: `["cottage cheese", "keso", "grynost"]`, canned tuna: `["tuna", "tonfisk", …]`, eggs: `["egg", "eggs", "ägg"]`. Every food has at least 2. Broad words are fine (e.g. "fruit"/"frukt" on bananas and apples, "fisk" on salmon). Write them with their normal accents; the search ignores accents and case. |
+| `starter` | `true` on about 15 common foods (eggs, keso, kvarg, milk, canned tuna, cod, tofu, red lentils, oats, rice, pasta, potatoes, bread, frozen veg, bananas). On a first visit, **My foods** starts with exactly these. Only foods that are starters have the field. The starter set must give three valid plans with the default settings (test 30). |
+
+**How search matches** (`foodMatches` in `app.js`): the query and the texts are lower-cased and accents are removed (å → a, ä → a, ö → o, é → e), then split into words at anything that isn't a letter or digit. A food matches if the query's words appear **at the start of a word, in a row**, in its `name` or any of its `aliases`. So "hono" finds Hönökaka, "agg" finds eggs (alias "ägg"), "cottage ch" finds keso, but "ice" doesn't find rice. An empty query matches every food.
 
 ### Food-group limits – `data/groups.json`
 Limits on the **total** grams per day of several foods together, so the plan can't stack e.g. keso + kvarg + yoghurt + milk. Used by plans 2 and 3 only. Members are the foods whose `limitGroup` is the group's `id`.
@@ -243,7 +255,7 @@ The 1 g minimum stops near fat-free foods (e.g. Greek yoghurt 0% with 0.2 g fat)
 This is the classic **diet problem**, solved with linear programming.
 
 ### Model
-For each ticked food *i*, the variable is **xᵢ = grams per day**.
+For each food *i* in My foods, the variable is **xᵢ = grams per day**.
 
 **Minimize** total daily cost: `Σ krPerGramᵢ · xᵢ`
 
@@ -258,7 +270,7 @@ For each ticked food *i*, the variable is **xᵢ = grams per day**.
 - The variety and Poor caps are measured against the plan's **actual** total calories, not the target. Total calories are never above the target, so this is never looser than `≤ 0.35 / 0.40 × kcalTarget`, and "35% / 40% of calories" is exactly true in the result.
 
 ### Three plans
-The optimizer makes three plans from the same settings and ticked foods (`Optimizer.planAll(settings, foods, groups)`, where `groups` comes from `data/groups.json`), so the user can compare them. All three minimise cost.
+The optimizer makes three plans from the same settings and My foods (`Optimizer.planAll(settings, foods, groups)`, where `groups` comes from `data/groups.json`), so the user can compare them. All three minimise cost.
 
 | | Plan 1 – **Absolute cheapest** | Plan 2 – **Cheapest realistic** | Plan 3 – **High quality** |
 |---|---|---|---|
@@ -288,11 +300,11 @@ The optimizer makes three plans from the same settings and ticked foods (`Optimi
 
 ### When there's no solution (infeasible)
 Never just say "no solution". Tell the user why:
-1. Check whether the protein and calorie targets are reachable at all with the ticked foods and max limits. If not, say: *"With these foods you can reach at most X g protein within Y kcal. Tick more high-protein foods or raise the max limits."*
-   - If the protein quality rules are what blocks it, say so: *"You've ticked too few Excellent protein foods to get 60% of your protein from them. Tick e.g. keso, kvarg, tuna or tofu."*
+1. Check whether the protein and calorie targets are reachable at all with My foods and the max limits. If not, say: *"With these foods you can reach at most X g protein within Y kcal. Add more high-protein foods or raise the max limits."*
+   - If the protein quality rules are what blocks it, say so: *"My foods has too few Excellent protein foods to get 60% of your protein from them. Add e.g. keso, kvarg, tuna or tofu."*
 2. If they're reachable but the cheapest solution is over budget, say: *"The cheapest plan costs Z kr, which is W kr over budget."* Still show that plan.
-3. **Plans 2 and 3** first check the food count: *"This plan needs at least 10 different foods, but only N are ticked. Tick more foods."* Then, if the plan fails even without the floor, 10 foods and group limits, they run the checks in point 1 with their own targets (115 g or 130 g protein, 60% or 80% Excellent, realistic max limits). Otherwise it's the realistic rules together: *"The realistic rules … can't all be met with these foods at X g protein. Tick a few more foods."*
-4. **Plan 3** has no plan if plan 2 has none (same reasons), if the budget is below plan 2's cost (*"Your budget of X kr is less than the cheapest realistic plan (Y kr), so no realistic plan fits. Raise the budget or tick cheaper foods."*), or if the high quality plan costs more than the budget: *"The high quality plan costs X kr, which is W kr over your budget of B kr."*
+3. **Plans 2 and 3** first check the food count: *"This plan needs at least 10 different foods, but only N are in My foods. Add more foods."* Then, if the plan fails even without the floor, 10 foods and group limits, they run the checks in point 1 with their own targets (115 g or 130 g protein, 60% or 80% Excellent, realistic max limits). Otherwise it's the realistic rules together: *"The realistic rules … can't all be met with these foods at X g protein. Add a few more foods."*
+4. **Plan 3** has no plan if plan 2 has none (same reasons), if the budget is below plan 2's cost (*"Your budget of X kr is less than the cheapest realistic plan (Y kr), so no realistic plan fits. Raise the budget or add cheaper foods."*), or if the high quality plan costs more than the budget: *"The high quality plan costs X kr, which is W kr over your budget of B kr."*
 
 ### v0.1 improvement (only if rounding causes problems)
 Switch the variables to **whole packages per month**, using integer variables in the same solver. Then the budget is exact and nothing needs rounding. Do this only after v0 works.
@@ -306,12 +318,18 @@ Still one `index.html`, split into **five tabs**. Switching tabs only shows one 
 **Tab bar:** fixed to the bottom of the screen on a phone, like a phone app: five buttons with an icon and a short label, at least 44 px tall (60 px), with room for the iPhone home indicator. On a wide screen (760 px and up) it sits at the top instead, with icon and label side by side. The open tab is green and bold.
 
 1. **Settings tab:** budget, kcal, protein, days. Large inputs with sensible defaults (4,000 kr, 1,700 kcal, 110 g, 30 days).
-2. **Foods tab:** the personal target-density line, the "Sort by" choice, and the food list grouped by category: each food with a checkbox, its rating badge (green, yellow or red), small fibre and ⚠ sat. fat badges (section 4.5), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. Tapping a food opens its min/max fields (advanced, hidden by default; step 6).
+2. **Foods tab:**
+   - **Search bar** at the top ("Add a food"). Focusing it opens the **full food list in a scrollable dropdown** under it; each row shows the name, its category and the protein rating badge, plus **+** (tap to add) or **✓** (already in My foods; tapping does nothing). If an alias matched, it's shown after the name, e.g. *Canned tuna “tonfisk”*. Typing filters the list live (matching rules in section 3). Tapping a result adds it to My foods and keeps the dropdown open, so you can add several. Arrow keys and Enter work on a computer. The dropdown closes on **Escape** or a **tap outside** the search box (which also closes the phone keyboard).
+   - **Phone keyboard:** focusing the search scrolls it to the top of the screen; the dropdown's height is set to the room left above the keyboard (`window.visualViewport`) and it scrolls on its own. While it's open the bottom tab bar is hidden, so it can't cover the list. Result rows are 48 px tall, the input 44 px.
+   - The personal target-density line.
+   - **My foods (N):** only the foods you've added, grouped by category and sorted with the "Sort by" choice. Each food has a ticked checkbox (untick = remove it from My foods; the whole row is the tap target, ≥ 44 px), its rating badge (green, yellow or red), small fibre and ⚠ sat. fat badges (section 4.5), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. If it's empty, a hint says to search to add foods. Tapping a food opens its min/max fields (advanced, hidden by default; step 6).
+   - **The optimizer uses only My foods.**
+   - **Saved:** the ids are kept in `localStorage` under `pbp.myFoods` (a list, wrapped in try/catch). On the **first visit** (nothing saved) My foods is the starter set (`"starter": true`). **Moving old users over:** if only the old `pbp.ticks` is saved (`{ id: false }` for unticked foods, everything else counted as ticked), My foods becomes every food that wasn't unticked, and `pbp.ticks` is removed once My foods is saved. A saved empty list stays empty. Ids no longer in `foods.json` are dropped.
 3. **Plans tab:**
    - The **"Make my grocery list"** button, which runs `Optimizer.planAll`. Before the first run, a short hint says what it does.
    - **Three comparison cards** (section 5, "Three plans"), side by side on a wide screen and stacked on a phone: *Absolute cheapest*, *Cheapest realistic* (selected by default), *High quality*. Each card shows total cost vs the budget, protein and kcal per day, % of protein from Excellent foods and the number of foods, or "Not possible".
    - **Tapping a card selects it and opens the List tab.**
-   - **Out of date:** if settings or ticks change after plans were made, a small red dot appears on the Plans tab button and an "out of date" note appears above the cards, until the button is pressed again.
+   - **Out of date:** if settings or My foods change after plans were made, a small red dot appears on the Plans tab button and an "out of date" note appears above the cards, until the button is pressed again.
 4. **List tab** (grocery list and protein quality only, for the selected plan; before the first run it says to make plans first, with a "Go to Plans" button):
    - Top line: **Total 3,420 kr of 4,000 kr ✔** · **112 g protein/day** · **1,690 kcal/day**
    - Messages, e.g. over budget, or why the plan isn't possible
@@ -361,7 +379,7 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 7 | Check rounding | Packages × pack size ≥ monthly grams for every food |
 | 8 | Ratings | keso, kvarg, tuna, tofu = Excellent; eggs, lentils, salmon = OK; peanut butter, oats, rice = Poor |
 | 9 | Peanut butter, oats, lentils, rice + keso and tuna ticked | ≥ 60% of protein from Excellent foods; Poor foods ≤ 40% of kcal |
-| 10 | Only peanut butter, oats, lentils and rice ticked | Infeasible, with the "tick more Excellent protein foods" message |
+| 10 | Only peanut butter, oats, lentils and rice ticked | Infeasible, with the "add more Excellent protein foods" message |
 | 11 | Lifts/dilutes and target density | Lifts/dilutes uses the fixed 10 g per 100 kcal: keso and tuna "lift"; eggs, lentils, chickpeas and oats "dilute". Target density 110 g / 1,700 kcal → 6.5 g per 100 kcal (info only); changing protein to 150 changes only the info line, no food's label |
 | 12 | Three plans, default settings | All three give valid plans: kcal 1,615–1,700; protein ≥ 110 / 115 / 130; ≥ 60% / 60% / 80% of protein from Excellent; Poor ≤ 40% of kcal |
 | 13 | Cost order, default settings | Plan 1 ≤ plan 2 ≤ plan 3 ≤ budget |
@@ -378,8 +396,12 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 24 | Fibre ratings and warnings | e.g. lentils, oats, chickpeas, Oumph, bread = High fibre; pasta, frozen veg, Quest chips = Source; rice, keso, tuna = Low; prästost, keso, Barebells, milk = ⚠ sat. fat; Greek yoghurt 0% has no sat. fat warning; no food gets a sugar warning and the page never shows "⚠ Sugar" (sugarPer100g still in the data); the Foods tab badges match |
 | 25 | Macro view (real `index.html`, Macros tab) | Pie drawn with a conic gradient (4 slices); table rows protein, carbs, fat, fibre with grams matching the optimizer, kcal = grams × 4 / 4 / 9 / 2, % of kcal adding up to 100, and a total kcal row; Monthly shows grams and kcal × days with the same %; fibre / fat / carbs rows are green or yellow as expected |
 | 26 | Macros tab and plan switcher (real `index.html`) | Macros is the fifth tab, after List, with its own icon; the switcher shows the three plans (≥ 44 px), starts on the selected plan, and tapping a plan shows its total kcal, stays on Macros, and selects its Plans card and List |
+| 27 | Food search (`searchFoods` + real `index.html`) | Finds by alias (tonfisk → both tuna products, lax → salmon), without accents (hono → Hönökaka, agg → eggs, prast → prästost, jordnotssmor → peanut butter), case-insensitive, two words in a row (cottage ch → keso); "ice" and "una" find nothing; every food has ≥ 2 aliases. On the page: focus opens the list with every food, its category and the right protein badge; typing "tonfisk" filters live; Escape and a tap outside close it, a tap inside doesn't; input and rows ≥ 44 px |
+| 28 | Adding and removing (real `index.html`) | Unticking keso removes it from My foods, the saved list and what the optimizer gets; searching "cottage" and tapping keso adds it back under its category, saves it and shows ✓; tapping it again changes nothing; the row (untick control) ≥ 44 px |
+| 29 | The optimizer uses only My foods (real `index.html`) | With 12 foods in My foods, the button makes the same three plans (foods and totals) as `Optimizer.planAll` with only those 12, and no grocery list has any other food |
+| 30 | Starter set and moving old ticks over (reloads `index.html`) | 12–18 foods have `"starter": true` and give three valid plans; first visit (nothing saved) shows and saves exactly the starter set; old `pbp.ticks` with keso and oil unticked becomes every other food, and `pbp.ticks` is removed; a saved empty list stays empty |
 
-"Tuna" in tests 4, 8 and 9 means both tuna products (canned and frozen). Test 4 also uses a food set where tuna is normally picked, and test 6 adds a stress case (quality rules off, every max × 10) so the variety cap actually has to do something. `test.html` also shows the three default plans side by side.
+"Tuna" in tests 4, 8 and 9 means both tuna products (canned and frozen). Test 4 also uses a food set where tuna is normally picked, and test 6 adds a stress case (quality rules off, every max × 10) so the variety cap actually has to do something. `test.html` also shows the three default plans side by side. The page tests start with every food in My foods, and the user's own saved data (`pbp.*` in `localStorage`) is put back after the run.
 
 ---
 

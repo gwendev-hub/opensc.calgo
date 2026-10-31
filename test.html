@@ -694,7 +694,7 @@
       {
         title: "Main page: tabs, plan cards and grocery list",
         expected:
-          "Each tab shows only its own panel. With default settings and all foods ticked, the button on the Plans tab " +
+          "Each tab shows only its own panel. With default settings and every food in My foods, the button on the Plans tab " +
           "shows 3 cards (Cheapest realistic selected); tapping a card selects it and opens the List tab with its grocery " +
           "list and protein quality (no macros: they have their own tab); the open tab is remembered; changing a setting " +
           "shows a dot on Plans and the 'out of date' note",
@@ -903,7 +903,323 @@
           return { checks };
         },
       },
+      {
+        title: "Food search",
+        expected:
+          "Case-insensitive, ignores accents, matches the start of any word in the name or the aliases " +
+          "(tonfisk → both tuna products, cottage → keso, hono → Hönökaka, agg → eggs; ice doesn't find rice). " +
+          "On the real page: focusing the search shows every food with its category and protein badge; typing filters " +
+          "live; Escape and tapping outside close the list; tapping inside doesn't; rows and the input ≥ 44 px",
+        async run(app) {
+          const ids = (query) => app.searchFoods(query).map((f) => f.id).join();
+          // [query, expected ids in foods.json order, why]
+          const cases = [
+            ["tonfisk", "tuna_can,tuna_frozen", "Swedish alias"],
+            ["tuna", "tuna_can,tuna_frozen", "English name"],
+            ["COTTAGE", "keso", "English alias, upper case"],
+            ["cottage ch", "keso", "two words in a row"],
+            ["hono", "honokaka", "no accents typed, name has ö"],
+            ["Hönö", "honokaka", "accents typed"],
+            ["agg", "eggs", "alias ägg without accents"],
+            ["prast", "prastost", "name prästost without accents"],
+            ["jordnotssmor", "peanut_butter", "alias jordnötssmör without accents"],
+            ["lax", "salmon_frozen", "Swedish alias"],
+            ["ice", "", "middle of a word doesn't match (rice)"],
+            ["una", "", "middle of a word doesn't match (tuna)"],
+          ];
+          const checks = cases.map(([query, want, why]) =>
+            [`"${query}" → ${ids(query) || "nothing"} (${why})`, ids(query) === want]);
+          checks.push([`"cheese" finds keso and prästost (${ids("cheese")})`, /keso/.test(ids("cheese")) && /prastost/.test(ids("cheese"))]);
+          checks.push([`empty search lists all ${foods.length} foods`, app.searchFoods("").length === foods.length]);
+          const noAliases = foods.filter((f) => !Array.isArray(f.aliases) || f.aliases.length < 2 || !f.aliases.every((a) => typeof a === "string" && a));
+          checks.push([`every food has at least 2 aliases` + (noAliases.length ? ` (missing: ${noAliases.map((f) => f.id).join(", ")})` : ""), noAliases.length === 0]);
+
+          const page = pageSearch(app);
+          checks.push(
+            ["focusing the search opens the list", page.openOnFocus],
+            [`the list shows every food (${page.allRows} of ${foods.length})`, page.allRows === foods.length],
+            ["every row shows its category", page.categoriesOk],
+            ["every row's protein badge matches Optimizer.proteinRating", page.badgesOk],
+            [`typing "tonfisk" filters live to: ${page.filtered.join(", ")}`, page.filtered.join() === "tuna_can,tuna_frozen"],
+            ["Escape closes the list", page.closedByEscape],
+            ["tapping inside the list keeps it open", page.openAfterInsideTap],
+            ["tapping outside closes the list", page.closedByOutsideTap],
+            ["while open, the bottom tab bar is hidden on a phone (body.searching)", page.searchingClass],
+            [`search input is at least 44 px tall (${page.inputHeight})`, page.inputHeight >= 44],
+            [`result rows are at least 44 px tall (${page.rowHeight})`, page.rowHeight >= 44],
+          );
+          return { checks };
+        },
+      },
+      {
+        title: "Adding and removing foods",
+        expected:
+          "Unticking a food removes it from My foods (and from localStorage). Searching and tapping it adds it back " +
+          "under its category, the result shows ✓, and tapping it again does nothing. Each row's untick control is ≥ 44 px",
+        run(app) {
+          const page = pageAddRemove(app);
+          return {
+            checks: [
+              ["unticking keso removes its row from My foods", page.removed.rowGone],
+              ["…and from the saved My foods", page.removed.notSaved],
+              ["…and from what the optimizer gets", page.removed.notInList],
+              [`the count under My foods goes down (${page.before.count} → ${page.removed.count})`, page.removed.count === `(${foods.length - 1})`],
+              [`searching "cottage" shows keso with + (${page.search.rows.join(", ")}, mark "${page.search.mark}")`,
+                page.search.rows.join() === "keso" && page.search.mark === "+"],
+              [`tapping it adds keso to My foods under "${page.added.category}"`, page.added.rowBack && page.added.category === "Eggs & dairy"],
+              ["…and saves it", page.added.saved],
+              [`the result now shows ✓ (got "${page.added.mark}")`, page.added.mark === "✓" && page.added.disabled],
+              ["the list stays open after adding", page.added.stillOpen],
+              ["tapping the ✓ result again does nothing", page.again.sameCount && page.again.oneRow],
+              [`untick control (the whole row) is at least 44 px tall (${page.rowHeight})`, page.rowHeight >= 44],
+            ],
+          };
+        },
+      },
+      {
+        title: "The optimizer uses only My foods",
+        expected:
+          "With 12 foods in My foods and default settings, the button makes the same three plans as " +
+          "Optimizer.planAll with just those 12 foods, and no plan's grocery list has any other food",
+        async run(app) {
+          const page = await pageOnlyMyFoods(app);
+          const expected = Optimizer.planAll(DEFAULTS, pick(TWELVE_FOODS), groups);
+          const checks = [
+            [`My foods is exactly the 12 foods (${page.myFoods.length})`, page.myFoods.slice().sort().join() === TWELVE_FOODS.slice().sort().join()],
+          ];
+          for (const key of THREE) {
+            const shown = page.plans[key];
+            const want = expected[key];
+            const wantIds = want.status === "optimal" ? want.items.map((i) => i.id) : [];
+            const outside = shown.ids.filter((id) => !TWELVE_FOODS.includes(id));
+            checks.push(
+              [`${want.title}: every food is in My foods` + (outside.length ? ` (not: ${outside.join(", ")})` : ""), outside.length === 0 && !shown.ids.includes(undefined)],
+              [`${want.title}: same foods as the optimizer with only My foods (${shown.ids.length} foods)`, shown.ids.join() === wantIds.join()],
+              [`${want.title}: same total (${shown.total || "no plan"})`,
+                want.status === "optimal" ? shown.total === `${Math.round(want.totals.shoppingCost).toLocaleString("en-GB")} kr` : shown.total === ""],
+            );
+          }
+          return { checks };
+        },
+      },
+      {
+        title: "Starter set on the first visit, and moving old ticks over",
+        expected:
+          "About 15 foods are marked \"starter\": true and give three valid plans. With nothing saved, My foods is the " +
+          "starter set (and is saved). Old \"pbp.ticks\" become My foods (every food except the unticked ones) and the old " +
+          "key is removed. A saved empty My foods stays empty (no starter set again)",
+        async run() {
+          const starters = foods.filter((f) => f.starter === true).map((f) => f.id);
+          const three = Optimizer.planAll(DEFAULTS, pick(starters), groups);
+          const page = await pageFirstVisit();
+          const same = (a, b) => a.slice().sort().join() === b.slice().sort().join();
+          const migratedWant = foods.filter((f) => !["keso", "oil"].includes(f.id)).map((f) => f.id);
+          return {
+            checks: [
+              [`${starters.length} starter foods (about 15)`, starters.length >= 12 && starters.length <= 18],
+              [`the starter set gives three valid plans with default settings (${THREE.map((k) => three[k].status).join(", ")})`,
+                THREE.every((k) => three[k].status === "optimal" && !three[k].totals.overBudget)],
+              [`first visit: My foods shows the ${page.first.shown.length} starter foods`, same(page.first.shown, starters)],
+              ["first visit: the starter set is saved", same(page.first.saved || [], starters)],
+              [`old ticks (keso and oil unticked): My foods has the other ${page.migrated.shown.length} foods`, same(page.migrated.shown, migratedWant)],
+              ["old ticks: saved as My foods", same(page.migrated.saved || [], migratedWant)],
+              ["old ticks: the old pbp.ticks key is removed", page.migrated.oldKeyGone],
+              ["saved empty My foods: stays empty and says how to add foods", page.empty.shown.length === 0 && page.empty.emptyText],
+            ],
+            notes: ["Reloads the hidden page with different saved data; your own saved data is put back afterwards."],
+          };
+        },
+      },
     ];
+
+    // 12 foods for test 29: the 9 foods of test 21 plus three more, so plans 2 and 3 can work too
+    const TWELVE_FOODS = [...NINE_FOODS, "oats", "pasta", "veg_frozen"];
+
+    // The ids of the foods shown in My foods on the hidden page
+    const myFoodIds = (app) => [...app.document.querySelectorAll("#food-list input[data-id]")].map((b) => b.dataset.id);
+
+    // Fire an event on the hidden page the way a real tap or key would reach app.js
+    const fireIn = (app, el, type, init = {}) => el.dispatchEvent(new app.Event(type, { bubbles: true, ...init }));
+    const keyIn = (app, el, key) => el.dispatchEvent(new app.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+
+    // Test 27 on the real page: open the search, read the rows, filter, then close it two ways.
+    // The frame is hidden, so focus() wouldn't work: the focus event is fired directly instead.
+    function pageSearch(app) {
+      const doc = app.document;
+      const input = doc.getElementById("food-search-input");
+      const list = doc.getElementById("food-results");
+      const rows = () => [...list.querySelectorAll(".food-result")];
+      const isOpen = () => !list.hidden && input.getAttribute("aria-expanded") === "true";
+      const type = (text) => {
+        input.value = text;
+        fireIn(app, input, "input");
+      };
+      doc.querySelector('.tab-bar [data-tab="foods"]').click();
+
+      try {
+        type("");
+        fireIn(app, input, "focus", { bubbles: false });
+        const openOnFocus = isOpen();
+        const searchingClass = doc.body.classList.contains("searching");
+        const all = rows();
+        const foodOfRow = (row) => foods.find((f) => f.id === row.dataset.id);
+        const categoriesOk = all.every((r) => r.querySelector(".result-category").textContent === foodOfRow(r).category);
+        const badgesOk = all.every((r) => r.querySelector(".badge").classList.contains(Optimizer.proteinRating(foodOfRow(r))));
+        const rowHeight = all.length ? parseFloat(app.getComputedStyle(all[0]).minHeight) : 0;
+        const inputHeight = parseFloat(app.getComputedStyle(input).minHeight);
+
+        type("tonfisk");
+        const filtered = rows().map((r) => r.dataset.id);
+
+        keyIn(app, input, "Escape");
+        const closedByEscape = !isOpen() && !doc.body.classList.contains("searching");
+
+        // Open again, press inside the list (stays open), then press outside (closes)
+        fireIn(app, input, "focus", { bubbles: false });
+        fireIn(app, rows()[0], "pointerdown");
+        const openAfterInsideTap = isOpen();
+        fireIn(app, doc.getElementById("foods-title"), "pointerdown");
+        const closedByOutsideTap = !isOpen();
+
+        return {
+          openOnFocus, searchingClass, allRows: all.length, categoriesOk, badgesOk, rowHeight, inputHeight,
+          filtered, closedByEscape, openAfterInsideTap, closedByOutsideTap,
+        };
+      } finally {
+        type("");
+        keyIn(app, input, "Escape");
+      }
+    }
+
+    // Test 28 on the real page: untick keso, add it back through the search, tap it again
+    function pageAddRemove(app) {
+      const doc = app.document;
+      const input = doc.getElementById("food-search-input");
+      const list = doc.getElementById("food-results");
+      const savedIds = () => JSON.parse(app.localStorage.getItem("pbp.myFoods") || "[]");
+      const count = () => doc.getElementById("my-food-count").textContent;
+      const kesoRow = () => doc.querySelector('#food-list input[data-id="keso"]');
+      const resultRow = () => list.querySelector('.food-result[data-id="keso"]');
+      doc.querySelector('.tab-bar [data-tab="foods"]').click();
+
+      try {
+        const before = { count: count() };
+        const rowHeight = parseFloat(app.getComputedStyle(kesoRow().closest(".food")).minHeight);
+
+        // Untick keso
+        const box = kesoRow();
+        box.checked = false;
+        fireIn(app, box, "change");
+        const removed = {
+          rowGone: kesoRow() === null,
+          notSaved: !savedIds().includes("keso"),
+          notInList: !app.myFoodList().some((f) => f.id === "keso"),
+          count: count(),
+        };
+
+        // Search for it and tap the result
+        fireIn(app, input, "focus", { bubbles: false });
+        input.value = "cottage";
+        fireIn(app, input, "input");
+        const search = {
+          rows: [...list.querySelectorAll(".food-result")].map((r) => r.dataset.id),
+          mark: resultRow().querySelector(".result-mark").textContent,
+        };
+        resultRow().click();
+        const added = {
+          rowBack: kesoRow() !== null,
+          category: kesoRow() ? kesoRow().closest(".food-group").querySelector("h3").textContent : "",
+          saved: savedIds().includes("keso"),
+          mark: resultRow().querySelector(".result-mark").textContent,
+          disabled: resultRow().getAttribute("aria-disabled") === "true",
+          stillOpen: !list.hidden,
+        };
+
+        // Tap it again: nothing should change
+        const sizeBefore = app.myFoodList().length;
+        resultRow().click();
+        const again = {
+          sameCount: app.myFoodList().length === sizeBefore,
+          oneRow: doc.querySelectorAll('#food-list input[data-id="keso"]').length === 1,
+        };
+        return { before, rowHeight, removed, search, added, again };
+      } finally {
+        input.value = "";
+        keyIn(app, input, "Escape");
+        app.addFood("keso");
+      }
+    }
+
+    // Test 29 on the real page: only 12 foods in My foods, press the button, read each plan's list
+    async function pageOnlyMyFoods(app) {
+      const doc = app.document;
+      const button = doc.getElementById("make-list");
+      const setInput = (id, value) => {
+        doc.getElementById(id).value = value;
+        fireIn(app, doc.getElementById(id), "input");
+      };
+      try {
+        for (const [key, value] of Object.entries(DEFAULTS)) setInput(key, value);
+        for (const f of foods) app.removeFood(f.id);
+        for (const id of TWELVE_FOODS) app.addFood(id);
+        const myFoods = app.myFoodList().map((f) => f.id);
+
+        // Press the button: it's disabled while the optimizer runs, then enabled again
+        doc.querySelector('.tab-bar [data-tab="plans"]').click();
+        button.click();
+        const started = Date.now();
+        while (button.disabled) {
+          if (Date.now() - started > 15000) throw new Error("the page didn't make the plans in time");
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        // Each plan's grocery list: the food names (the text before the badge) turned back into ids
+        const plans = {};
+        for (const key of THREE) {
+          app.selectPlan(key);
+          const detail = doc.getElementById("plan-detail");
+          const names = [...detail.querySelectorAll(".grocery tbody tr td:first-child")].map((td) => td.firstChild.textContent.trim());
+          const total = detail.querySelector(".grocery tfoot td");
+          plans[key] = {
+            ids: names.map((name) => (foods.find((f) => f.name === name) || {}).id),
+            total: total ? total.textContent : "",
+          };
+        }
+        return { myFoods, plans };
+      } finally {
+        for (const f of foods) app.addFood(f.id);
+      }
+    }
+
+    // Test 30: reload the page with different saved data, as if it were a first visit or an old user.
+    // Runs last, because it reloads the hidden page.
+    async function pageFirstVisit() {
+      const keys = ["pbp.myFoods", "pbp.ticks"];
+      const saved = keys.map((k) => localStorage.getItem(k));
+      const savedMyFoods = () => JSON.parse(localStorage.getItem("pbp.myFoods") || "null");
+      try {
+        // First visit: nothing saved at all
+        keys.forEach((k) => localStorage.removeItem(k));
+        let app = await reloadApp();
+        const first = { shown: myFoodIds(app), saved: savedMyFoods() };
+
+        // Old user: only the old ticks are saved, with keso and oil unticked
+        localStorage.setItem("pbp.ticks", JSON.stringify({ keso: false, oil: false, eggs: true }));
+        localStorage.removeItem("pbp.myFoods");
+        app = await reloadApp();
+        const migrated = { shown: myFoodIds(app), saved: savedMyFoods(), oldKeyGone: localStorage.getItem("pbp.ticks") === null };
+
+        // Someone who removed every food: an empty list is saved and must stay empty
+        localStorage.setItem("pbp.myFoods", "[]");
+        app = await reloadApp();
+        const empty = { shown: myFoodIds(app), emptyText: Boolean(app.document.querySelector("#food-list .empty-foods")) };
+
+        return { first, migrated, empty };
+      } finally {
+        keys.forEach((k, i) => (saved[i] === null ? localStorage.removeItem(k) : localStorage.setItem(k, saved[i])));
+        await reloadApp();
+      }
+    }
 
     // The page run is shared by tests 22, 25 and 26, so it only happens once
     let pagePlansPromise = null;
@@ -917,7 +1233,7 @@
     // The page saves settings, ticks and the open tab in localStorage, so those are put back afterwards.
     async function pagePlans(app) {
       const doc = app.document;
-      const keys = ["pbp.settings", "pbp.ticks", "pbp.tab"];
+      const keys = ["pbp.settings", "pbp.myFoods", "pbp.tab"];
       const saved = keys.map((k) => app.localStorage.getItem(k));
       const fire = (el, type) => el.dispatchEvent(new app.Event(type, { bubbles: true }));
       const setInput = (id, value) => {
@@ -964,17 +1280,12 @@
         const tabOrder = [...doc.querySelectorAll(".tab-bar .tab")].map((t) => t.dataset.tab);
         const macrosHasIcon = Boolean(doc.querySelector('.tab-bar [data-tab="macros"] svg'));
 
-        // Default settings and every food ticked, so the page matches scenarios.three()
+        // Default settings and every food in My foods, so the page matches scenarios.three()
         setInput("budget", DEFAULTS.budget);
         setInput("kcal", DEFAULTS.kcal);
         setInput("protein", DEFAULTS.protein);
         setInput("days", DEFAULTS.days);
-        for (const box of doc.querySelectorAll('#food-list input[type="checkbox"]')) {
-          if (!box.checked) {
-            box.checked = true;
-            fire(box, "change");
-          }
-        }
+        for (const f of foods) app.addFood(f.id);
 
         // Go to the Plans tab, press the button and wait for the cards (the page re-enables the button when done)
         tapTab("plans");
@@ -1116,20 +1427,31 @@
       }
     }
 
-    // Wait until the hidden page has loaded app.js and drawn its food list
+    // Wait until the hidden page has loaded app.js and its foods (the search box is enabled then;
+    // My foods can be empty, so its rows can't be what we wait for)
     function waitForApp() {
       const frame = document.getElementById("app-frame");
       return new Promise((resolve, reject) => {
         const started = Date.now();
         const check = () => {
           const win = frame.contentWindow;
-          const ready = win && win.document && win.document.querySelector("#food-list .food");
+          const search = win && win.document && win.document.getElementById("food-search-input");
+          const ready = search && !search.disabled;
           if (ready && typeof win.liftsOrDilutes === "function") return resolve(win);
           if (Date.now() - started > 8000) return reject(new Error("index.html / app.js didn't load in the hidden frame"));
           setTimeout(check, 100);
         };
         check();
       });
+    }
+
+    // Reload the hidden page (e.g. after changing localStorage, like a new visit) and wait until it's ready
+    async function reloadApp() {
+      const frame = document.getElementById("app-frame");
+      const loaded = new Promise((resolve) => frame.addEventListener("load", resolve, { once: true }));
+      frame.contentWindow.location.reload();
+      await loaded;
+      return waitForApp();
     }
 
     // Escape text before putting it into HTML
@@ -1190,22 +1512,38 @@
         appError = err;
       }
 
+      // The hidden page shares this page's localStorage. Remember the user's own saved data
+      // (settings, My foods, open tab) so it can be put back after all the tests.
+      const savedStorage = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key.startsWith("pbp.")) savedStorage[key] = localStorage.getItem(key);
+      }
+      // Start the page tests with every food in My foods, so they see the whole food list
+      if (app) for (const f of foods) app.addFood(f.id);
+
       let passed = 0;
       let html = "";
-      for (let i = 0; i < TESTS.length; i++) {
-        const test = TESTS[i];
-        let outcome;
-        try {
-          // Tests that take an argument need app.js
-          if (test.run.length > 0 && !app) throw appError;
-          outcome = await test.run(app);
-        } catch (err) {
-          // A crash counts as a failure, with the error shown
-          outcome = { checks: [[`error: ${err.message}`, false]] };
+      try {
+        for (let i = 0; i < TESTS.length; i++) {
+          const test = TESTS[i];
+          let outcome;
+          try {
+            // Tests that take an argument need app.js
+            if (test.run.length > 0 && !app) throw appError;
+            outcome = await test.run(app);
+          } catch (err) {
+            // A crash counts as a failure, with the error shown
+            outcome = { checks: [[`error: ${err.message}`, false]] };
+          }
+          const card = renderTest(i + 1, test, outcome);
+          if (card.pass) passed++;
+          html += card.html;
         }
-        const card = renderTest(i + 1, test, outcome);
-        if (card.pass) passed++;
-        html += card.html;
+      } finally {
+        // Put the user's own saved data back, exactly as it was
+        for (const key of Object.keys(localStorage)) if (key.startsWith("pbp.")) localStorage.removeItem(key);
+        for (const [key, value] of Object.entries(savedStorage)) localStorage.setItem(key, value);
       }
       results.innerHTML = html;
       summary.textContent = `${passed} / ${TESTS.length} passed`;

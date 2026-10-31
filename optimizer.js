@@ -85,7 +85,7 @@ const Optimizer = (() => {
 
   // Build the javascript-lp-solver model.
   // settings: { kcal, protein, budget, days, limits?, rules? }
-  // foods:    only the foods the user ticked
+  // foods:    only the foods in My foods
   // options changes the goal, adds rules or drops rules:
   //   optimize/opType     – what to maximise or minimise (default: minimise cost)
   //   skip                – names of rules to leave out ("kcalMin", "protein",
@@ -385,8 +385,8 @@ const Optimizer = (() => {
       problems.push({
         code: "excellent",
         message:
-          `You've ticked too few Excellent protein foods to get ${pct(rules.excellentProteinShare)}% ` +
-          `of your protein from them. Tick e.g. keso, kvarg, tuna or tofu.`,
+          `My foods has too few Excellent protein foods to get ${pct(rules.excellentProteinShare)}% ` +
+          `of your protein from them. Add e.g. keso, kvarg, tuna or tofu.`,
       });
     }
 
@@ -403,7 +403,7 @@ const Optimizer = (() => {
         code: "poor",
         message:
           `Too many of your calories would have to come from Poor protein foods ` +
-          `(at most ${pct(rules.poorKcalShare)}% is allowed). Tick more Excellent or OK foods, ` +
+          `(at most ${pct(rules.poorKcalShare)}% is allowed). Add more Excellent or OK foods, ` +
           `or raise their max limits.`,
       });
     }
@@ -422,7 +422,7 @@ const Optimizer = (() => {
         maxProtein,
         message:
           `With these foods you can reach at most ${Math.floor(maxProtein)} g protein within ` +
-          `${kcalTarget} kcal. Tick more high-protein foods or raise the max limits.`,
+          `${kcalTarget} kcal. Add more high-protein foods or raise the max limits.`,
       });
     }
 
@@ -435,7 +435,7 @@ const Optimizer = (() => {
         maxKcal,
         message:
           `With these foods and max limits you can reach at most ${Math.floor(maxKcal)} kcal a day, ` +
-          `but you need at least ${Math.ceil(kcalMin)}. Tick more foods or raise the max limits.`,
+          `but you need at least ${Math.ceil(kcalMin)}. Add more foods or raise the max limits.`,
       });
     }
 
@@ -445,7 +445,7 @@ const Optimizer = (() => {
         code: "variety",
         message:
           `No single food may give more than ${pct(rules.varietyKcalShare)}% of your calories. ` +
-          `Tick a few more foods so the calories can be spread out.`,
+          `Add a few more foods so the calories can be spread out.`,
       });
     }
 
@@ -455,7 +455,7 @@ const Optimizer = (() => {
         code: "combined",
         message:
           "Each target is reachable on its own, but not all of them at once with these foods. " +
-          "Tick more foods or raise some max limits.",
+          "Add more foods or raise some max limits.",
       });
     }
 
@@ -530,7 +530,7 @@ const Optimizer = (() => {
     if (usable < rules.minFoods) {
       problems.push({
         code: "minFoods",
-        message: `This plan needs at least ${rules.minFoods} different foods, but only ${usable} are ticked. Tick more foods.`,
+        message: `This plan needs at least ${rules.minFoods} different foods, but only ${usable} are in My foods. Add more foods.`,
       });
     }
 
@@ -551,7 +551,7 @@ const Optimizer = (() => {
         message:
           `The realistic rules (at least ${rules.minFoods} different foods, at least ${rules.minGramsIfUsed} g ` +
           `of each food you eat, realistic max amounts and food-group limits) can't all be met with these ` +
-          `foods at ${Math.round(setup.options.proteinMin)} g protein. Tick a few more foods.`,
+          `foods at ${Math.round(setup.options.proteinMin)} g protein. Add a few more foods.`,
       });
     }
     return problems;
@@ -591,7 +591,7 @@ const Optimizer = (() => {
           message:
             `Your budget of ${Math.round(settings.budget)} kr is less than the cheapest realistic plan ` +
             `(${Math.round(realistic.totals.shoppingCost)} kr), so no realistic plan fits. ` +
-            `Raise the budget or tick cheaper foods.`,
+            `Raise the budget or add cheaper foods.`,
         },
       ]);
     }

@@ -42,14 +42,29 @@
 
     <!-- ===== Tab 2: Foods ===== -->
     <div id="panel-foods" class="tab-panel" role="tabpanel" aria-labelledby="tab-foods" hidden>
-      <!-- Foods card: tick the foods you'd eat. The list itself is built by app.js from data/foods.json -->
+      <!-- Foods card: search to add foods, and "My foods" (the only foods the optimizer uses).
+           Both lists are built by app.js from data/foods.json -->
       <section class="card" aria-labelledby="foods-title">
         <h2 id="foods-title">Foods</h2>
+
+        <!-- Search box. Focusing it opens the full food list below it; typing filters it.
+             Disabled until data/foods.json has loaded. -->
+        <div id="food-search" class="food-search">
+          <label for="food-search-input">Add a food</label>
+          <input id="food-search-input" type="search" placeholder="Search, e.g. keso, tonfisk, rice"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
+            role="combobox" aria-expanded="false" aria-controls="food-results" aria-autocomplete="list" disabled>
+          <ul id="food-results" class="food-results" role="listbox" aria-label="Foods" hidden></ul>
+        </div>
+
         <p class="hint">
           Your targets need at least <strong id="target-density">–</strong> g protein per 100 kcal
           on average across the whole plan.
           Foods with more than 10 g protein per 100 kcal <em>lift</em> your plan; the rest <em>dilute</em> it.
         </p>
+
+        <h3 class="section-title">My foods <span id="my-food-count" class="muted"></span></h3>
+        <p class="hint">Plans only use these foods. Untick a food to remove it.</p>
 
         <!-- How to order foods inside each category -->
         <label for="food-sort">Sort by</label>
@@ -58,7 +73,7 @@
           <option value="price">Price per 100 g protein</option>
         </select>
 
-        <!-- app.js fills this with one group per category -->
+        <!-- app.js fills this with one group per category (My foods only) -->
         <div id="food-list" aria-live="polite">Loading foods…</div>
       </section>
     </div>
@@ -71,7 +86,7 @@
       <p id="plans-stale" class="warning" hidden>You changed something. Tap “Make my grocery list” again to update.</p>
 
       <!-- Before the first run -->
-      <p id="plans-empty" class="hint">Tap the button to make three plans from your settings and ticked foods.</p>
+      <p id="plans-empty" class="hint">Tap the button to make three plans from your settings and My foods.</p>
 
       <!-- After a run: tap a card to see its grocery list on the List tab -->
       <section id="plans" aria-labelledby="plans-title" hidden>

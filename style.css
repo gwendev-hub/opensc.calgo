@@ -158,11 +158,6 @@ select {
   font-size: 0.9rem;
 }
 
-/* Unticked foods are faded so the ticked ones stand out */
-.food.unticked .food-info {
-  opacity: 0.5;
-}
-
 /* Coloured rating badges: green, yellow, red */
 .badge {
   display: inline-block;
@@ -661,3 +656,142 @@ button.secondary {
 .range-name  { font-weight: 700; min-width: 3.5em; }
 .range-value { font-weight: 600; }
 .range-target { font-size: 0.85rem; }
+
+/* ---------- Food search and My foods (Foods tab) ---------- */
+
+/* The search box and its dropdown. position: relative so the dropdown can sit right under the input.
+   scroll-margin-top: room above the box when it's scrolled to the top of the screen. */
+.food-search {
+  position: relative;
+  margin-bottom: 16px;
+  scroll-margin-top: 8px;
+}
+
+/* Same size as the number inputs: at least 44px tall, and 16px text so iPhone doesn't zoom in */
+input[type="search"] {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 4px;
+  padding: 8px 12px;
+  font-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+input[type="search"]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The dropdown floats over My foods and scrolls on its own. app.js sets max-height to the room
+   left above the keyboard; 50vh is the fallback. overscroll-behavior stops the page scrolling
+   when you reach the end of the list. */
+.food-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 20;
+  max-height: 50vh;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+
+/* One result: name and category on the left, badge and +/✓ on the right, at least 44px tall */
+.food-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  /* No grey flash on iPhone when tapping */
+  -webkit-tap-highlight-color: transparent;
+}
+
+.food-result:first-child {
+  border-top: none;
+}
+
+/* Highlighted with the arrow keys, or pressed */
+.food-result[aria-selected="true"],
+.food-result:active {
+  background: #eef6f0;
+}
+
+.result-info {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.result-category,
+.result-alias {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* The badge sits on the right here, not after the name */
+.food-result .badge {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
+/* "+" for foods you can add, a green "✓" for foods already in My foods */
+.result-mark {
+  width: 24px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* Foods already in My foods: tapping does nothing, so no pointer and slightly faded */
+.food-result.added {
+  cursor: default;
+}
+
+.food-result.added .result-info {
+  opacity: 0.6;
+}
+
+.no-results {
+  padding: 12px;
+  color: var(--muted);
+}
+
+/* "My foods" heading sits closer to the hint under it */
+#panel-foods .section-title {
+  margin: 20px 0 2px;
+}
+
+.empty-foods {
+  margin-top: 16px;
+}
+
+/* Phone, while the search list is open: hide the bottom tab bar (on Android it would sit just above
+   the keyboard and cover the list), and add room under the page so the search box can always be
+   scrolled to the top of the screen */
+@media (max-width: 759px) {
+  body.searching .tab-bar {
+    display: none;
+  }
+
+  body.searching main {
+    padding-bottom: 100vh;
+  }
+}
