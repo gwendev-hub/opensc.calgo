@@ -7,6 +7,11 @@
   --border: #d6d6d0;
   --accent: #2e7d4f;
   --radius: 12px;
+  /* Macro pie chart colours */
+  --macro-protein: #2e7d4f;
+  --macro-carbs: #e0a800;
+  --macro-fat: #4a78c2;
+  --macro-fiber: #8a6d4b;
 }
 
 /* Make width/height include padding and borders (easier sizing) */
@@ -496,3 +501,127 @@ button.secondary {
   border-radius: 8px;
   cursor: pointer;
 }
+
+/* ---------- Nutrient badges (Foods tab) ---------- */
+
+/* Smaller badges after the protein badge */
+.badge.small {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0 6px;
+  margin-left: 4px;
+}
+
+.badge.fiber-high   { background: #e6dccd; color: #5a4325; }
+.badge.fiber-source { background: #f1ebe2; color: #6b5536; }
+.badge.fiber-low    { background: #eeeeea; color: var(--muted); font-weight: normal; }
+.badge.warn         { background: #fbefc4; color: #7a5a00; }
+
+/* ---------- Macros (List tab) ---------- */
+
+/* Daily / Monthly switch: two joined buttons */
+.toggle {
+  display: inline-flex;
+  margin: 4px 0 12px;
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.toggle button {
+  min-height: 40px;
+  min-width: 88px;
+  padding: 6px 14px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--card);
+  border: none;
+  cursor: pointer;
+}
+
+/* The chosen option is filled green */
+.toggle button[aria-pressed="true"] {
+  color: #fff;
+  background: var(--accent);
+}
+
+/* Pie and legend side by side (they wrap on a very narrow screen) */
+.macro-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+/* The pie itself: a circle filled with a conic gradient set in app.js */
+.macro-pie {
+  width: 104px;
+  height: 104px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.macro-legend {
+  flex: 1;
+  min-width: 180px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* One legend row: swatch, name, %, grams */
+.macro-legend li {
+  display: grid;
+  grid-template-columns: 14px 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.macro-pct,
+.macro-grams {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Keep the grams lined up at the right edge */
+.macro-grams {
+  min-width: 4.2em;
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.swatch.protein { background: var(--macro-protein); }
+.swatch.carbs   { background: var(--macro-carbs); }
+.swatch.fat     { background: var(--macro-fat); }
+.swatch.fiber   { background: var(--macro-fiber); }
+
+/* Range checks: green inside the range, yellow outside */
+.ranges {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.range-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+.range-row.in-range     { background: #d6f0dd; color: #1d6b3a; }
+.range-row.out-of-range { background: #fbefc4; color: #5c4400; }
+
+.range-name  { font-weight: 700; min-width: 3.5em; }
+.range-value { font-weight: 600; }
+.range-target { font-size: 0.85rem; }

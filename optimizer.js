@@ -38,6 +38,30 @@ const Optimizer = (() => {
     return "poor";
   }
 
+  // Fibre rating per 100 g (PLAN.md section 4.5): ≥ 6 g → High, ≥ 3 g → Source, otherwise Low
+  function fiberRating(f) {
+    const fiber = f.fiberPer100g || 0;
+    if (fiber >= 6) return "high";
+    if (fiber >= 3) return "source";
+    return "low";
+  }
+
+  // Foods with less than this much fat (or carbs) per 100 g get no warning about it,
+  // so e.g. 0.2 g fat in Greek yoghurt 0% isn't flagged for saturated fat
+  const WARNING_MIN_GRAMS = 1;
+
+  // Nutrient warnings per food (PLAN.md section 4.5). Returns a list, e.g. ["satFat", "sugar"]:
+  //   "satFat" – saturated fat is more than ⅓ of the fat
+  //   "sugar"  – sugar is more than ⅓ of the carbs
+  function nutrientWarnings(f) {
+    const warnings = [];
+    const fat = f.fatPer100g || 0;
+    const carbs = f.carbsPer100g || 0;
+    if (fat >= WARNING_MIN_GRAMS && (f.saturatedFatPer100g || 0) > fat / 3) warnings.push("satFat");
+    if (carbs >= WARNING_MIN_GRAMS && (f.sugarPer100g || 0) > carbs / 3) warnings.push("sugar");
+    return warnings;
+  }
+
   // The solver keeps its own fields (feasible, result, bounded) next to the
   // variable values in its answer, so food variables get a prefix that can't
   // collide with those names.
@@ -225,6 +249,8 @@ const Optimizer = (() => {
     let shoppingCost = 0;
     let kcalPerDay = 0;
     let proteinPerDay = 0;
+    // Other nutrients per day, in grams (PLAN.md section 4.5)
+    const nutrients = { carbs: 0, fat: 0, fiber: 0, saturatedFat: 0, sugar: 0 };
     // kcal and protein per day, split by rating
     const byRating = {
       excellent: { kcal: 0, protein: 0 },
@@ -268,7 +294,17 @@ const Optimizer = (() => {
       proteinPerDay += protein;
       byRating[rating].kcal += kcal;
       byRating[rating].protein += protein;
+      for (const name of Object.keys(nutrients)) {
+        nutrients[name] += ((f[name + "Per100g"] || 0) * gramsPerDay) / 100;
+      }
     }
+
+    // Macro shares of energy for the pie chart: protein and carbs 4 kcal/g, fat 9 kcal/g.
+    // They're shares of the energy from these three, so they always add up to 100%.
+    const macroKcal = { protein: proteinPerDay * 4, carbs: nutrients.carbs * 4, fat: nutrients.fat * 9 };
+    const macroTotal = macroKcal.protein + macroKcal.carbs + macroKcal.fat;
+    const macroKcalShare = {};
+    for (const m of Object.keys(macroKcal)) macroKcalShare[m] = macroTotal > 0 ? macroKcal[m] / macroTotal : 0;
 
     // Shares as fractions (0–1) of total protein and total kcal
     const proteinShare = {};
@@ -290,6 +326,11 @@ const Optimizer = (() => {
         overBy: Math.max(0, overBy),
         kcalPerDay,
         proteinPerDay,
+        carbsPerDay: nutrients.carbs,
+        fatPerDay: nutrients.fat,
+        fiberPerDay: nutrients.fiber,
+        saturatedFatPerDay: nutrients.saturatedFat,
+        sugarPerDay: nutrients.sugar,
         foodCount: items.length,
       },
       quality: {
@@ -297,6 +338,8 @@ const Optimizer = (() => {
         kcalShare,
         // % of calories that come from protein (4 kcal per gram)
         proteinKcalShare: kcalPerDay > 0 ? (proteinPerDay * 4) / kcalPerDay : 0,
+        // Protein / carbs / fat as shares of their combined energy (for the macro pie)
+        macroKcalShare,
       },
     };
   }
@@ -608,5 +651,7 @@ const Optimizer = (() => {
   }
 
   // What other files can use
-  return { DEFAULT_RULES, PLAN_TITLES, proteinRating, buildModel, solve, plan, planAll };
+  return {
+    DEFAULT_RULES, PLAN_TITLES, proteinRating, fiberRating, nutrientWarnings, buildModel, solve, plan, planAll,
+  };
 })();

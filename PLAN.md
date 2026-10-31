@@ -62,11 +62,28 @@ Everything is stored **per 100 g**, so all foods can be compared. Foods sold by 
   "pieceGrams": null,
   "kcalPer100g": 96,
   "proteinPer100g": 12,
+  "carbsPer100g": 2.5,
+  "fiberPer100g": 0,
+  "fatPer100g": 4,
+  "saturatedFatPer100g": 2.6,
+  "sugarPer100g": 2.5,
   "maxGramsPerDay": 300,
   "priceSource": "Estimate, Oct 2026",
   "nutritionSource": "Label / Livsmedelsverket"
 }
 ```
+
+**Other nutrients** (all per 100 g, typical Swedish label / Livsmedelsverket values, every food's `nutritionSource` says "to check"):
+
+| Field | Meaning |
+|---|---|
+| `carbsPer100g` | Available carbohydrates ("kolhydrater" on Swedish labels), **without** fibre |
+| `fiberPer100g` | Dietary fibre ("fiber") |
+| `fatPer100g` | Total fat |
+| `saturatedFatPer100g` | Saturated fat ("varav mättat fett"), part of `fatPer100g` |
+| `sugarPer100g` | Sugars ("varav sockerarter"), part of `carbsPer100g` |
+
+Check: `kcal ≈ 4 × protein + 4 × carbs + 9 × fat + 2 × fibre` within 15% for every food (test 23). Products with sugar alcohols (e.g. Barebells) count them as carbs, which makes the estimate a bit high.
 
 Derived in code, not stored:
 - `krPerGram = packPrice / packGrams`
@@ -191,6 +208,30 @@ These become constraints in the model (section 5). Defaults are listed, and all 
   - % of calories from protein (`protein × 4 / kcal`)
   - a warning if any single Poor food gives more than 15% of calories, e.g. *"Peanut butter gives 18% of your calories but only 4% of your protein."*
 
+### 4.5 Other nutrients: fibre, fat and sugar (information only)
+These don't change the optimizer (yet); they help judge a plan. The rules live in `optimizer.js` (`Optimizer.fiberRating`, `Optimizer.nutrientWarnings`) so the page and the tests use the same code.
+
+**Per food** (small badges next to the protein badge on the Foods tab):
+
+| Badge | Rule (per 100 g) |
+|---|---|
+| **High fibre** | fibre ≥ 6 g |
+| **Fibre source** | fibre ≥ 3 g |
+| **Low fibre** (grey) | under 3 g |
+| **⚠ Sat. fat** | saturated fat > ⅓ of fat, for foods with at least 1 g fat |
+| **⚠ Sugar** | sugar > ⅓ of carbs, for foods with at least 1 g carbs |
+
+The 1 g minimum stops near fat-free foods (e.g. Greek yoghurt 0% with 0.2 g fat) being flagged. Natural sugars count too, so milk, kvarg, yoghurt, fruit, tomatoes and frozen vegetables get "⚠ Sugar".
+
+**Per plan** (List tab, "Macros"):
+- **Pie chart** of protein / carbs / fat as a share of their energy (4 / 4 / 9 kcal per gram), so the three always add up to 100%. Drawn with a CSS `conic-gradient`, no chart library. This can differ by a point or two from "% of calories from protein" in 4.4, which divides by the label kcal.
+- **Grams** of protein, carbs, fat and fibre, with a **Daily / Monthly** toggle (monthly = per day × days in the period).
+- **Ranges**, green inside and yellow outside:
+  - fibre per day: 25–35 g
+  - fat: 25–40% of energy
+  - carbs: 45–60% of energy
+- `summarise` in the optimizer adds `carbsPerDay`, `fatPerDay`, `fiberPerDay`, `saturatedFatPerDay`, `sugarPerDay` to `totals`, and `macroKcalShare` to `quality`.
+
 ---
 
 ## 5. The optimizer (the core of the app)
@@ -261,7 +302,7 @@ Still one `index.html`, split into **four tabs**. Switching tabs only shows one 
 **Tab bar:** fixed to the bottom of the screen on a phone, like a phone app: four buttons with an icon and a short label, at least 44 px tall (60 px), with room for the iPhone home indicator. On a wide screen (760 px and up) it sits at the top instead, with icon and label side by side. The open tab is green and bold.
 
 1. **Settings tab:** budget, kcal, protein, days. Large inputs with sensible defaults (4,000 kr, 1,700 kcal, 110 g, 30 days).
-2. **Foods tab:** the personal target-density line, the "Sort by" choice, and the food list grouped by category: each food with a checkbox, its rating badge (green, yellow or red), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. Tapping a food opens its min/max fields (advanced, hidden by default; step 6).
+2. **Foods tab:** the personal target-density line, the "Sort by" choice, and the food list grouped by category: each food with a checkbox, its rating badge (green, yellow or red), small fibre and ⚠ badges (section 4.5), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. Tapping a food opens its min/max fields (advanced, hidden by default; step 6).
 3. **Plans tab:**
    - The **"Make my grocery list"** button, which runs `Optimizer.planAll`. Before the first run, a short hint says what it does.
    - **Three comparison cards** (section 5, "Three plans"), side by side on a wide screen and stacked on a phone: *Absolute cheapest*, *Cheapest realistic* (selected by default), *High quality*. Each card shows total cost vs the budget, protein and kcal per day, % of protein from Excellent foods and the number of foods, or "Not possible".
@@ -272,6 +313,7 @@ Still one `index.html`, split into **four tabs**. Switching tabs only shows one 
    - Messages, e.g. over budget, or why the plan isn't possible
    - Grocery table: food, rating badge, amount per day, packages, cost, and a total
    - **Protein quality** section (section 4.4)
+   - **Macros** section (section 4.5): pie chart of protein / carbs / fat, grams with a Daily / Monthly toggle, and the fibre / fat / carbs range checks
    - A "Copy list" button that copies plain text to paste into Notes or a message (step 6)
    - Warnings such as large leftovers (step 5)
 5. **Footer:** where the prices come from and their date, a "not medical advice" note, and a feedback link (on every tab, above the tab bar).
@@ -323,6 +365,10 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 19 | Food-group limits | In plans 2 and 3: dairy ≤ 700 g/day; rice + pasta + bulgur + oats ≤ 200 g dry/day; every group in `groups.json` has members |
 | 20 | Budget 1,500 kr (between plan 2 and plan 3) | Plans 1 and 2 fit; plan 3 has no plan and says what it would cost and how far over budget |
 | 21 | Only 9 foods ticked | Plan 1 still works; plans 2 and 3 say they need at least 10 different foods (and nothing misleading) |
+| 22 | Main page with tabs (real `index.html`) | Each tab shows only its panel; tab buttons ≥ 44 px; the button on Plans shows 3 cards with Cheapest realistic selected; tapping a card selects it and opens List with its grocery list and protein quality; the open tab is remembered; a change shows the dot on Plans and the "out of date" note |
+| 23 | Nutrients add up | Every food has the 5 nutrient fields, saturated fat ≤ fat, sugar ≤ carbs, and kcal ≈ 4P + 4C + 9F + 2 fibre within 15% (failures are listed) |
+| 24 | Fibre ratings and warnings | e.g. lentils, oats, chickpeas, Oumph, bread = High fibre; pasta, frozen veg, Quest chips = Source; rice, keso, tuna = Low; prästost, keso, Barebells, milk = ⚠ sat. fat; banana, apple, milk, keso, Greek yoghurt = ⚠ sugar; Greek yoghurt 0% has no sat. fat warning; the Foods tab badges match |
+| 25 | Macro view (real `index.html`) | Pie drawn with a conic gradient, legend % adds up to 100; daily grams match the optimizer; Monthly shows grams × days; fibre / fat / carbs rows are green or yellow as expected |
 
 "Tuna" in tests 4, 8 and 9 means both tuna products (canned and frozen). Test 4 also uses a food set where tuna is normally picked, and test 6 adds a stress case (quality rules off, every max × 10) so the variety cap actually has to do something. `test.html` also shows the three default plans side by side.
 

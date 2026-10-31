@@ -698,7 +698,7 @@
           "shows 3 cards (Cheapest realistic selected); tapping a card selects it and opens the List tab with its grocery " +
           "list and protein quality; the open tab is remembered; changing a setting shows a dot on Plans and the 'out of date' note",
         async run(app) {
-          const page = await pagePlans(app);
+          const page = await pagePlansOnce(app);
           const three = scenarios.three();
           const rowsOk = (key, rows) => three[key].status === "optimal" && rows === three[key].items.length;
           return {
@@ -727,7 +727,133 @@
           };
         },
       },
+      {
+        title: "Nutrients add up to the kcal",
+        expected: "For every food: kcal ≈ 4 × protein + 4 × carbs + 9 × fat + 2 × fibre, within 15%; all five new fields present",
+        run() {
+          const fields = ["carbsPer100g", "fiberPer100g", "fatPer100g", "saturatedFatPer100g", "sugarPer100g"];
+          const missing = foods.filter((f) => !fields.every((k) => typeof f[k] === "number" && f[k] >= 0));
+          // Saturated fat is part of fat, and sugar is part of carbs
+          const impossible = foods.filter((f) => f.saturatedFatPer100g > f.fatPer100g || f.sugarPer100g > f.carbsPer100g);
+          // Estimated kcal from the nutrients, and how far it is from the label kcal
+          const rows = foods.map((f) => {
+            const estimate = 4 * f.proteinPer100g + 4 * f.carbsPer100g + 9 * f.fatPer100g + 2 * f.fiberPer100g;
+            return { f, estimate, off: (estimate - f.kcalPer100g) / f.kcalPer100g };
+          });
+          const failing = rows.filter((r) => Math.abs(r.off) > 0.15);
+          const worst = rows.reduce((a, b) => (Math.abs(b.off) > Math.abs(a.off) ? b : a));
+          return {
+            checks: [
+              [`all ${foods.length} foods have the 5 nutrient fields` + (missing.length ? ` (missing: ${missing.map((f) => f.id).join(", ")})` : ""), missing.length === 0],
+              ["saturated fat ≤ fat and sugar ≤ carbs" + (impossible.length ? ` (wrong: ${impossible.map((f) => f.id).join(", ")})` : ""), impossible.length === 0],
+              [
+                failing.length
+                  ? `outside 15%: ${failing.map((r) => `${r.f.id} (label ${r.f.kcalPer100g}, estimate ${fmt(r.estimate)}, ${pct(r.off)})`).join("; ")}`
+                  : `all ${foods.length} foods within 15%`,
+                failing.length === 0,
+              ],
+            ],
+            notes: [`Furthest off: ${worst.f.name}, label ${worst.f.kcalPer100g} kcal vs estimate ${fmt(worst.estimate, 1)} (${pct(worst.off)}).`],
+          };
+        },
+      },
+      {
+        title: "Fibre ratings and nutrient warnings",
+        expected:
+          "Fibre High ≥ 6 g, Source ≥ 3 g, else Low; ⚠ when saturated fat > ⅓ of fat or sugar > ⅓ of carbs " +
+          "(only for foods with at least 1 g fat / carbs); the Foods tab shows the same badges",
+        run(app) {
+          const byId = (id) => foods.find((f) => f.id === id);
+          const fiberExpected = {
+            lentils_red: "high", oats: "high", chickpeas_can: "high", oumph: "high", bread: "high",
+            pasta: "source", veg_frozen: "source", quest_chips: "source",
+            rice: "low", keso: "low", tuna_can: "low",
+          };
+          const warningsExpected = {
+            prastost: ["satFat"], keso: ["satFat", "sugar"], barebells: ["satFat"], milk: ["satFat", "sugar"],
+            banana: ["sugar"], apple: ["sugar"],
+            greek_0: ["sugar"], // 0.2 g fat is under 1 g, so no saturated fat warning; its sugar is lactose
+            oats: [], pasta: [], tuna_can: [], lentils_red: [],
+          };
+          const checks = [];
+          for (const [id, want] of Object.entries(fiberExpected)) {
+            const got = Optimizer.fiberRating(byId(id));
+            checks.push([`${id}: fibre ${byId(id).fiberPer100g} g → ${got} (expected ${want})`, got === want]);
+          }
+          for (const [id, want] of Object.entries(warningsExpected)) {
+            const got = Optimizer.nutrientWarnings(byId(id));
+            checks.push([`${id}: warnings [${got.join(", ")}] (expected [${want.join(", ")}])`, got.join() === want.join()]);
+          }
+          // The Foods tab on the real page shows the same fibre badge and warnings for every food
+          const wrong = [...app.document.querySelectorAll("#food-list li")].filter((li) => {
+            const f = byId(li.querySelector("input").dataset.id);
+            const fiberOk = li.querySelector(`.badge.fiber-${Optimizer.fiberRating(f)}`) !== null;
+            return !fiberOk || li.querySelectorAll(".badge.warn").length !== Optimizer.nutrientWarnings(f).length;
+          });
+          checks.push([`Foods tab badges match for all foods` + (wrong.length ? ` (wrong: ${wrong.length})` : ""), wrong.length === 0]);
+          const flagged = foods.filter((f) => Optimizer.nutrientWarnings(f).length);
+          return {
+            checks,
+            notes: [`Foods with a warning: ${flagged.map((f) => `${f.id} (${Optimizer.nutrientWarnings(f).join("+")})`).join(", ")}`],
+          };
+        },
+      },
+      {
+        title: "Macro view on the List tab",
+        expected:
+          "Pie of protein / carbs / fat (% of energy, adds up to 100%) with grams per day; the Monthly toggle shows grams × days; " +
+          "fibre vs 25–35 g, fat vs 25–40% and carbs vs 45–60% are green inside and yellow outside the range",
+        async run(app) {
+          const page = await pagePlansOnce(app);
+          const plan = scenarios.three().cheapest; // the List tab shows this plan after the card tap
+          const t = plan.totals;
+          const share = plan.quality.macroKcalShare;
+          const g = (n) => `${Math.round(n).toLocaleString("en-GB")} g`;
+          const day = page.macroDay;
+          const month = page.macroMonth;
+          const pctSum = day.pcts.reduce((s, p) => s + parseFloat(p), 0);
+
+          // Recalculate the plan's grams per day from its items, to check the optimizer's totals
+          const sumOf = (field) => plan.items.reduce((s, i) => s + (foodOf(i)[field] * i.gramsPerDay) / 100, 0);
+          const totalsOk = ["carbs", "fat", "fiber"].every((n) => Math.abs(sumOf(n + "Per100g") - t[n + "PerDay"]) < 1e-6);
+
+          // Which ranges should be green
+          const inside = (v, lo, hi) => v >= lo && v <= hi;
+          const expectedRanges = [
+            ["Fibre", inside(t.fiberPerDay, 25, 35)],
+            ["Fat", inside(share.fat, 0.25, 0.4)],
+            ["Carbs", inside(share.carbs, 0.45, 0.6)],
+          ];
+          const shownRanges = day.ranges.map((r) => [r.name, r.inRange]);
+          return {
+            checks: [
+              ["optimizer's carbs, fat and fibre totals match the plan's foods", totalsOk],
+              [`optimizer's macro shares add up to 100% (${pct(share.protein + share.carbs + share.fat)})`, Math.abs(share.protein + share.carbs + share.fat - 1) < 1e-9],
+              ["pie is drawn with a CSS conic gradient", /conic-gradient/.test(day.pieStyle)],
+              [`pie legend %: ${day.pcts.join(" / ")} (adds up to ${pctSum}%)`, day.pcts.length === 3 && pctSum >= 99 && pctSum <= 101],
+              ["Daily is selected first", day.pressed === "day"],
+              [`daily grams: ${day.grams.join(", ")}`,
+                day.grams.join() === [t.proteinPerDay, t.carbsPerDay, t.fatPerDay, t.fiberPerDay].map(g).join()],
+              ["Monthly is selected after tapping it", month.pressed === "month"],
+              [`monthly grams (× ${DEFAULTS.days}): ${month.grams.join(", ")}`,
+                month.grams.join() === [t.proteinPerDay, t.carbsPerDay, t.fatPerDay, t.fiberPerDay].map((n) => g(n * DEFAULTS.days)).join()],
+              [`range colours: ${shownRanges.map(([n, ok]) => `${n} ${ok ? "green" : "yellow"}`).join(", ")}`,
+                JSON.stringify(shownRanges) === JSON.stringify(expectedRanges)],
+            ],
+            notes: [
+              `Absolute cheapest plan: ${fmt(t.fiberPerDay)} g fibre/day, fat ${pct(share.fat)}, carbs ${pct(share.carbs)} of energy.`,
+            ],
+          };
+        },
+      },
     ];
+
+    // The page run is shared by tests 22 and 25, so it only happens once
+    let pagePlansPromise = null;
+    function pagePlansOnce(app) {
+      if (!pagePlansPromise) pagePlansPromise = pagePlans(app);
+      return pagePlansPromise;
+    }
 
     // Drive the real page in the hidden frame: open each tab, set default settings,
     // tick every food, press the button, read the cards and list, tap a card, change a setting.
@@ -810,6 +936,26 @@
         doc.querySelector('.plan-card[data-key="cheapest"]').click();
         const afterTap = { ...readDetail(), selected: selectedKey(), tab: openTab(), savedTab: app.localStorage.getItem("pbp.tab") };
 
+        // The macro section of that plan: daily first, then after tapping "Monthly" (and back)
+        const readMacro = () => {
+          const section = doc.getElementById("macro-section");
+          const pie = section.querySelector(".macro-pie");
+          return {
+            pieStyle: pie ? pie.getAttribute("style") : "",
+            pcts: [...section.querySelectorAll(".macro-pct")].map((e) => e.textContent).filter(Boolean),
+            grams: [...section.querySelectorAll(".macro-grams")].map((e) => e.textContent),
+            ranges: [...section.querySelectorAll(".range-row")].map((r) => ({
+              name: r.querySelector(".range-name").textContent,
+              inRange: r.classList.contains("in-range"),
+            })),
+            pressed: (section.querySelector('[data-macro-period][aria-pressed="true"]') || { dataset: {} }).dataset.macroPeriod,
+          };
+        };
+        const macroDay = readMacro();
+        doc.querySelector('[data-macro-period="month"]').click();
+        const macroMonth = readMacro();
+        doc.querySelector('[data-macro-period="day"]').click();
+
         // Change a setting: the dot and the "out of date" note should appear
         setInput("protein", DEFAULTS.protein + 1);
         const dotAfter = !doc.getElementById("plans-dot").hidden;
@@ -817,7 +963,7 @@
 
         return {
           tabsShown, tabHeights, tabAfterRun, cards: cards.map((c) => c.dataset.key), cardsHaveStats,
-          selectedAtStart, first, afterTap, dotBefore, dotAfter, staleShown,
+          selectedAtStart, first, afterTap, dotBefore, dotAfter, staleShown, macroDay, macroMonth,
         };
       } finally {
         // Put the user's own saved settings and ticks back

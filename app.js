@@ -118,6 +118,23 @@ function isTicked(f) {
 const RATING_ORDER = { excellent: 0, ok: 1, poor: 2 };
 // Text shown on the rating badges
 const RATING_LABELS = { excellent: "Excellent", ok: "OK", poor: "Poor" };
+// Text for the fibre badges and the nutrient warnings (PLAN.md section 4.5)
+const FIBER_LABELS = { high: "High fibre", source: "Fibre source", low: "Low fibre" };
+const WARNING_LABELS = { satFat: "⚠ Sat. fat", sugar: "⚠ Sugar" };
+const WARNING_TITLES = {
+  satFat: "Saturated fat is more than a third of the fat",
+  sugar: "Sugar is more than a third of the carbs",
+};
+
+// The small fibre badge and any warning badges for one food (shown after the protein badge)
+function nutrientBadgesHtml(f) {
+  const fiber = Optimizer.fiberRating(f);
+  const fiberBadge = `<span class="badge small fiber-${fiber}" title="${f.fiberPer100g || 0} g fibre per 100 g">${FIBER_LABELS[fiber]}</span>`;
+  const warnings = Optimizer.nutrientWarnings(f)
+    .map((w) => `<span class="badge small warn" title="${WARNING_TITLES[w]}">${WARNING_LABELS[w]}</span>`)
+    .join("");
+  return fiberBadge + warnings;
+}
 const SORTERS = {
   // Best rating first; inside a rating, the most protein per calorie first
   rating: (a, b) =>
@@ -148,7 +165,7 @@ function foodRowHtml(f) {
       <label class="food${ticked ? "" : " unticked"}">
         <input type="checkbox" data-id="${f.id}"${ticked ? " checked" : ""}>
         <span class="food-info">
-          <span class="food-name">${f.name}</span><span class="badge ${rating}">${ratingLabel}</span><br>
+          <span class="food-name">${f.name}</span><span class="badge ${rating}">${ratingLabel}</span>${nutrientBadgesHtml(f)}<br>
           <span class="food-stats">
             ${proteinPer100kcal(f).toFixed(1)} g protein / 100 kcal ·
             ${krText} ·
@@ -288,6 +305,85 @@ function proteinQualityHtml(plan) {
     ${warnings}`;
 }
 
+// Show grams per day or per month in the macro section ("day" or "month")
+let macroPeriod = "day";
+
+// Ranges shown under the pie (PLAN.md section 4.5): green inside, yellow outside.
+// Fibre is in grams per day; fat and carbs are shares of energy.
+const MACRO_RANGES = {
+  fiber: { min: 25, max: 35 },
+  fat: { min: 0.25, max: 0.4 },
+  carbs: { min: 0.45, max: 0.6 },
+};
+
+// One range row: name, value, the range, and a green ✔ or a yellow "below"/"above"
+function rangeRowHtml(label, value, range, text, rangeText) {
+  const inside = value >= range.min && value <= range.max;
+  const verdict = inside ? "✔ in range" : value < range.min ? "below range" : "above range";
+  return `
+    <li class="range-row ${inside ? "in-range" : "out-of-range"}">
+      <span class="range-name">${label}</span>
+      <span class="range-value">${text}</span>
+      <span class="range-target">${rangeText} · ${verdict}</span>
+    </li>`;
+}
+
+// Build the macro section for one plan: pie chart, grams, daily/monthly toggle and ranges
+function macroHtml(plan) {
+  const t = plan.totals;
+  const share = plan.quality.macroKcalShare;
+  const days = readSettingsFromForm().days;
+
+  // Daily or monthly grams
+  const factor = macroPeriod === "month" ? days : 1;
+  const period = macroPeriod === "month" ? `for ${num(days)} days` : "per day";
+  const grams = (perDay) => `${num(perDay * factor)} g`;
+
+  // Pie chart: a CSS conic gradient with one slice per macro (no chart library)
+  const p = share.protein * 100;
+  const pc = (share.protein + share.carbs) * 100;
+  const pie = `
+    <div class="macro-pie" role="img"
+      aria-label="Energy from protein ${pct(share.protein)}, carbs ${pct(share.carbs)}, fat ${pct(share.fat)}"
+      style="background: conic-gradient(var(--macro-protein) 0 ${p.toFixed(1)}%, var(--macro-carbs) ${p.toFixed(1)}% ${pc.toFixed(1)}%, var(--macro-fat) ${pc.toFixed(1)}% 100%)"></div>`;
+
+  // Legend: colour, name, % of energy and grams
+  const legendRow = (key, label, perDay) => `
+    <li><span class="swatch ${key}"></span><span class="macro-name">${label}</span>
+      <span class="macro-pct">${pct(share[key])}</span><span class="macro-grams">${grams(perDay)}</span></li>`;
+  const legend = `
+    <ul class="macro-legend">
+      ${legendRow("protein", "Protein", t.proteinPerDay)}
+      ${legendRow("carbs", "Carbs", t.carbsPerDay)}
+      ${legendRow("fat", "Fat", t.fatPerDay)}
+      <li><span class="swatch fiber"></span><span class="macro-name">Fibre</span>
+        <span class="macro-pct"></span><span class="macro-grams">${grams(t.fiberPerDay)}</span></li>
+    </ul>`;
+
+  // Daily / monthly toggle (two buttons; the pressed one is highlighted)
+  const toggleButton = (value, label) =>
+    `<button type="button" data-macro-period="${value}" aria-pressed="${macroPeriod === value}">${label}</button>`;
+  const toggle = `
+    <div class="toggle" role="group" aria-label="Show grams">
+      ${toggleButton("day", "Daily")}${toggleButton("month", "Monthly")}
+    </div>`;
+
+  // The ranges always use daily values and shares
+  const ranges = `
+    <ul class="ranges">
+      ${rangeRowHtml("Fibre", t.fiberPerDay, MACRO_RANGES.fiber, `${num(t.fiberPerDay)} g/day`, "25–35 g")}
+      ${rangeRowHtml("Fat", share.fat, MACRO_RANGES.fat, pct(share.fat), "25–40%")}
+      ${rangeRowHtml("Carbs", share.carbs, MACRO_RANGES.carbs, pct(share.carbs), "45–60%")}
+    </ul>`;
+
+  return `
+    <h3>Macros</h3>
+    <p class="hint">Share of the energy from protein, carbs and fat (the three add up to 100%); grams ${period}.</p>
+    ${toggle}
+    <div class="macro-row">${pie}${legend}</div>
+    ${ranges}`;
+}
+
 // Build the grocery table for one plan: food, badge, grams per day, packages, cost
 function groceryTableHtml(plan) {
   const rows = plan.items
@@ -337,7 +433,8 @@ function renderPlanDetail() {
     <p class="top-line"><strong>Total ${costLine(plan)}</strong> · <strong>${num(t.proteinPerDay)} g protein/day</strong> · <strong>${num(t.kcalPerDay)} kcal/day</strong></p>
     ${messages}
     ${groceryTableHtml(plan)}
-    ${proteinQualityHtml(plan)}`;
+    ${proteinQualityHtml(plan)}
+    <div id="macro-section">${macroHtml(plan)}</div>`;
 }
 
 // Draw the three cards (Plans tab) and the selected plan (List tab)
@@ -508,6 +605,14 @@ function init() {
   document.getElementById("plan-cards").addEventListener("click", (event) => {
     const card = event.target.closest(".plan-card");
     if (card) selectPlan(card.dataset.key);
+  });
+
+  // Daily / monthly toggle in the macro section: redraw just that section
+  document.getElementById("plan-detail").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-macro-period]");
+    if (!button) return;
+    macroPeriod = button.dataset.macroPeriod;
+    document.getElementById("macro-section").innerHTML = macroHtml(plans[selectedPlan]);
   });
 
   // A tab in the tab bar was tapped
