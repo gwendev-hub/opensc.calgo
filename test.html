@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- Basic page setup: text encoding and phone-friendly scaling -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Optimizer tests</title>
+  <style>
+    /* Same colours as style.css, plus green/red for pass/fail */
+    :root {
+      --bg: #f5f5f2;
+      --card: #ffffff;
+      --text: #1d1d1b;
+      --muted: #5f5f5a;
+      --border: #d6d6d0;
+      --pass: #2e7d4f;
+      --fail: #b3261e;
+    }
+    /* Dark mode follows the phone/computer setting */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161615;
+        --card: #222220;
+        --text: #ececea;
+        --muted: #a5a5a0;
+        --border: #3a3a37;
+        --pass: #6cc58f;
+        --fail: #f2847b;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.45;
+    }
+    main { padding: 16px; max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 1.4rem; margin: 8px 0 4px; }
+    .muted { color: var(--muted); }
+    /* The "10 / 11 passed" line at the top */
+    #summary { font-size: 1.2rem; font-weight: 700; margin: 12px 0; }
+    #summary.pass { color: var(--pass); }
+    #summary.fail { color: var(--fail); }
+    /* One card per test */
+    .test {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-left: 6px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+    }
+    .test.pass { border-left-color: var(--pass); }
+    .test.fail { border-left-color: var(--fail); }
+    .test h2 { font-size: 1rem; margin: 0 0 6px; }
+    .verdict { font-weight: 800; margin-right: 6px; }
+    .pass .verdict { color: var(--pass); }
+    .fail .verdict { color: var(--fail); }
+    .test p { margin: 4px 0; }
+    /* The cost / kcal / protein / Excellent numbers */
+    .numbers { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .test ul { margin: 6px 0 0; padding-left: 20px; }
+    .ok { color: var(--pass); }
+    .bad { color: var(--fail); }
+    /* Side-by-side table of the three plans; scrolls sideways on a narrow phone */
+    #compare h2 { font-size: 1.1rem; margin: 16px 0 8px; }
+    .compare-wrap { overflow-x: auto; margin-bottom: 16px; }
+    .compare {
+      border-collapse: collapse;
+      background: var(--card);
+      min-width: 560px;
+      width: 100%;
+      font-size: 0.9rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .compare th, .compare td {
+      border: 1px solid var(--border);
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .compare thead th { width: 28%; }
+    .compare ul { margin: 0; padding-left: 16px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Optimizer tests</h1>
+    <p class="muted">Runs optimizer.js on the test cases from PLAN.md section 8.</p>
+    <p id="summary">Running…</p>
+    <!-- The three default plans next to each other (filled in by renderComparison) -->
+    <section id="compare"></section>
+    <div id="results"></div>
+  </main>
+
+  <!-- Hidden copy of the real page, so tests 8 and 11 check the functions in app.js itself -->
+  <iframe id="app-frame" src="index.html" hidden></iframe>
+
+  <!-- The LP solver (pinned version), then the optimizer that uses it -->
+  <script src="https://cdn.jsdelivr.net/npm/javascript-lp-solver@0.4.24/prod/solver.js"></script>
+  <script src="optimizer.js"></script>
+
+  <script>
+    // Small tolerance for comparing decimals (the solver's answers can be off by 0.0000001)
+    const EPS = 1e-6;
+
+    // Default settings from PLAN.md section 6
+    const DEFAULTS = { budget: 4000, kcal: 1700, protein: 110, days: 30 };
+
+    // "Tuna" in the plan means both tuna products in foods.json
+    const TUNA = ["tuna_can", "tuna_frozen"];
+    const NO_TUNA = { tuna_can: { max: 0 }, tuna_frozen: { max: 0 } };
+
+    // Foods from test 9: calorie-dense foods plus keso and tuna
+    const TEST9_FOODS = ["peanut_butter", "oats", "lentils_red", "rice", "keso", ...TUNA];
+
+    // All foods from data/foods.json and the food-group limits from data/groups.json (loaded below)
+    let foods = [];
+    let groups = [];
+
+    // Only the foods with these ids, as if only they were ticked
+    const pick = (ids) => foods.filter((f) => ids.includes(f.id));
+
+    // Run the optimizer once per scenario and remember the answer,
+    // so tests 6 and 7 can re-check the plans the other tests made
+    // (all = true runs Optimizer.planAll and caches all three plans)
+    const planCache = {};
+    function planFor(name, settings, ticked, all = false) {
+      if (!planCache[name]) planCache[name] = all ? Optimizer.planAll(settings, ticked, groups) : Optimizer.plan(settings, ticked);
+      return planCache[name];
+    }
+
+    // The scenarios used by the tests
+    const scenarios = {
+      defaults: () => planFor("defaults", DEFAULTS, foods),
+      riceApples: () => planFor("riceApples", DEFAULTS, pick(["rice", "apple"])),
+      budget500: () => planFor("budget500", { ...DEFAULTS, budget: 500 }, foods),
+      noTuna: () => planFor("noTuna", { ...DEFAULTS, limits: NO_TUNA }, foods),
+      // A food set where the cheapest plan does pick tuna, to prove max = 0 removes it
+      tunaSet: () => planFor("tunaSet", DEFAULTS, pick([...TEST9_FOODS, "eggs", "drickkvarg"])),
+      tunaSetNoTuna: () =>
+        planFor("tunaSetNoTuna", { ...DEFAULTS, limits: NO_TUNA }, pick([...TEST9_FOODS, "eggs", "drickkvarg"])),
+      eggsMin: () => planFor("eggsMin", { ...DEFAULTS, limits: { eggs: { min: 100 } } }, foods),
+      test9: () => planFor("test9", DEFAULTS, pick(TEST9_FOODS)),
+      // Same foods with the quality rules switched off, to show what the rules change
+      test9NoRules: () =>
+        planFor("test9NoRules", { ...DEFAULTS, rules: { excellentProteinShare: 0, poorKcalShare: 1 } }, pick(TEST9_FOODS)),
+      poorOnly: () => planFor("poorOnly", DEFAULTS, pick(["peanut_butter", "oats", "lentils_red", "rice"])),
+      // Stress case for the variety cap: quality rules off and every max × 10,
+      // so one cheap food would take over if the 35% cap didn't stop it
+      varietyStress: () => planFor("varietyStress", stressSettings(), foods),
+      varietyStressNoCap: () =>
+        planFor("varietyStressNoCap", stressSettings({ varietyKcalShare: 1 }), foods),
+      // The three plans (PLAN.md section 5, "Three plans") with default settings
+      three: () => planFor("three", DEFAULTS, foods, true),
+      realistic: () => scenarios.three().realistic,
+      highQuality: () => scenarios.three().highQuality,
+      // Budget below the cheapest realistic plan, so plan 3 can't exist
+      threeLowBudget: () => planFor("threeLowBudget", { ...DEFAULTS, budget: 1300 }, foods, true),
+      // Budget between plan 2 and plan 3, so only the high quality plan is over budget
+      threeMidBudget: () => planFor("threeMidBudget", { ...DEFAULTS, budget: 1500 }, foods, true),
+      // Only 9 foods ticked: too few for plans 2 and 3
+      nineFoods: () => planFor("nineFoods", DEFAULTS, pick(NINE_FOODS), true),
+    };
+
+    // The three plans in display order
+    const THREE = ["cheapest", "realistic", "highQuality"];
+
+    // 9 foods that easily meet the targets in plan 1, but are one short of plans 2 and 3's 10
+    const NINE_FOODS = ["tuna_can", "cod_frozen", "eggs", "keso", "kvarg", "greek_0", "tofu", "lentils_red", "rice"];
+
+    // Protein minimum and Excellent share each plan must meet with default settings
+    const RULES = Optimizer.DEFAULT_RULES;
+    const PLAN_TARGETS = {
+      cheapest: { protein: DEFAULTS.protein, excellent: RULES.excellentProteinShare },
+      realistic: { protein: DEFAULTS.protein + RULES.proteinBuffer, excellent: RULES.excellentProteinShare },
+      highQuality: { protein: DEFAULTS.protein + RULES.highQualityProteinExtra, excellent: RULES.highQualityExcellentShare },
+    };
+
+    // The food from foods.json for one item in a plan
+    const foodOf = (item) => foods.find((f) => f.id === item.id);
+
+    // Grams per day a plan uses from one food group (e.g. "dairy")
+    const groupGrams = (plan, groupId) =>
+      plan.items.filter((i) => foodOf(i).limitGroup === groupId).reduce((sum, i) => sum + i.gramsPerDay, 0);
+
+    // Settings for the variety stress case (extra rules can be added on top)
+    function stressSettings(extraRules = {}) {
+      const limits = {};
+      for (const f of foods) limits[f.id] = { max: f.maxGramsPerDay * 10 };
+      return { ...DEFAULTS, limits, rules: { excellentProteinShare: 0, poorKcalShare: 1, ...extraRules } };
+    }
+
+    // The largest share of the plan's calories that a single food gives (0–1)
+    function biggestKcalShare(plan) {
+      return Math.max(...plan.items.map((i) => i.kcalPerDay / plan.totals.kcalPerDay));
+    }
+
+    // Round to a fixed number of decimals for display
+    const fmt = (n, decimals = 0) => n.toFixed(decimals);
+    const pct = (share, decimals = 1) => (share * 100).toFixed(decimals) + "%";
+
+    // One line with the numbers a plan reached (or "no plan" if infeasible)
+    function numbersOf(plan) {
+      if (plan.status !== "optimal") return "No plan (infeasible)";
+      const t = plan.totals;
+      return (
+        `Cost ${fmt(t.shoppingCost)} kr · ${fmt(t.kcalPerDay)} kcal/day · ` +
+        `${fmt(t.proteinPerDay, 1)} g protein/day · ` +
+        `${pct(plan.quality.proteinShare.excellent)} of protein from Excellent`
+      );
+    }
+
+    // ---------- The test cases (PLAN.md section 8) ----------
+    // Each test returns { plan?, checks: [[label, true/false], ...], notes?: [text] }.
+    // A test passes when every check is true.
+    const TESTS = [
+      {
+        title: "Default settings, all foods ticked",
+        expected: "Solution found, protein ≥ 110, kcal between 1,615 and 1,700, cost ≤ 4,000",
+        run() {
+          const plan = scenarios.defaults();
+          const t = plan.totals || {};
+          return {
+            plan,
+            checks: [
+              ["solution found", plan.status === "optimal"],
+              [`protein ≥ 110 g (got ${fmt(t.proteinPerDay || 0, 1)})`, t.proteinPerDay >= 110 - EPS],
+              [
+                `kcal between 1,615 and 1,700 (got ${fmt(t.kcalPerDay || 0)})`,
+                t.kcalPerDay >= 1615 - EPS && t.kcalPerDay <= 1700 + EPS,
+              ],
+              [`cost ≤ 4,000 kr (got ${fmt(t.shoppingCost || 0)})`, t.shoppingCost <= 4000],
+            ],
+          };
+        },
+      },
+      {
+        title: "Only rice and apples ticked, protein 110",
+        expected: "Infeasible, with a message giving the maximum protein reachable",
+        run() {
+          const plan = scenarios.riceApples();
+          const problem = (plan.problems || []).find((p) => p.code === "protein");
+          const maxText = problem ? String(Math.floor(problem.maxProtein)) : "";
+          return {
+            plan,
+            checks: [
+              ["infeasible", plan.status === "infeasible"],
+              ["has a 'max protein reachable' message", Boolean(problem)],
+              [
+                `message shows the maximum protein (${maxText || "?"} g)`,
+                Boolean(problem) && problem.message.includes(maxText + " g protein"),
+              ],
+            ],
+          };
+        },
+      },
+      {
+        title: "Budget 500 kr, default foods",
+        expected: "Over-budget message showing the cheapest cost",
+        run() {
+          const plan = scenarios.budget500();
+          const cost = plan.totals ? fmt(plan.totals.shoppingCost) : "?";
+          return {
+            plan,
+            checks: [
+              ["plan still shown", plan.status === "optimal"],
+              ["marked over budget", Boolean(plan.totals && plan.totals.overBudget)],
+              [
+                `message shows the cheapest cost (${cost} kr)`,
+                plan.messages.some((m) => m.includes(`costs ${cost} kr`) && m.includes("over budget")),
+              ],
+            ],
+          };
+        },
+      },
+      {
+        title: "Tuna max = 0 (both tuna products)",
+        expected: "Tuna not in the result",
+        run() {
+          const plan = scenarios.noTuna();
+          const base = scenarios.tunaSet();
+          const without = scenarios.tunaSetNoTuna();
+          const hasTuna = (p) => p.status === "optimal" && p.items.some((i) => TUNA.includes(i.id));
+          const tunaGrams = base.status === "optimal"
+            ? base.items.filter((i) => TUNA.includes(i.id)).reduce((s, i) => s + i.gramsPerDay, 0)
+            : 0;
+          return {
+            plan,
+            checks: [
+              ["default foods: solution found", plan.status === "optimal"],
+              ["default foods: no tuna in the result", plan.status === "optimal" && !hasTuna(plan)],
+              [
+                `food set where tuna is normally picked (${fmt(tunaGrams)} g/day): tuna is in it`,
+                hasTuna(base),
+              ],
+              ["same food set with tuna max = 0: solution found", without.status === "optimal"],
+              ["same food set with tuna max = 0: no tuna in the result", without.status === "optimal" && !hasTuna(without)],
+            ],
+            notes: [
+              "Tuna isn't in the default plan anyway (other foods are cheaper per gram of protein), " +
+                "so the second food set (test 9 foods + eggs + drickkvarg) is the one that really tests the limit.",
+            ],
+          };
+        },
+      },
+      {
+        title: "Eggs min = 100 g/day",
+        expected: "Eggs ≥ 100 g/day in the result",
+        run() {
+          const plan = scenarios.eggsMin();
+          const eggs = plan.status === "optimal" ? plan.items.find((i) => i.id === "eggs") : null;
+          return {
+            plan,
+            checks: [
+              ["solution found", plan.status === "optimal"],
+              [`eggs ≥ 100 g/day (got ${eggs ? fmt(eggs.gramsPerDay) : 0} g)`, Boolean(eggs) && eggs.gramsPerDay >= 100 - EPS],
+            ],
+          };
+        },
+      },
+      {
+        title: "Variety cap",
+        expected: "No single food gives more than 35% of kcal",
+        run() {
+          // Every plan the tests made, plus the stress case
+          const names = ["defaults", "budget500", "noTuna", "eggsMin", "test9", "realistic", "highQuality", "varietyStress"];
+          const checks = names.map((name) => {
+            const plan = scenarios[name]();
+            if (plan.status !== "optimal") return [`${name}: no plan to check`, false];
+            const share = biggestKcalShare(plan);
+            return [`${name}: biggest single food = ${pct(share)} of kcal`, share <= 0.35 + EPS];
+          });
+          // Check that the stress case would break the cap without the rule,
+          // otherwise it isn't really testing anything
+          const noCap = scenarios.varietyStressNoCap();
+          const noCapShare = noCap.status === "optimal" ? biggestKcalShare(noCap) : 0;
+          checks.push([`stress case without the cap would reach ${pct(noCapShare)} (so the cap is doing work)`, noCapShare > 0.35]);
+          return {
+            plan: scenarios.varietyStress(),
+            checks,
+            notes: ["Numbers above are for the stress case: quality rules off and every max limit × 10."],
+          };
+        },
+      },
+      {
+        title: "Rounding to packages",
+        expected: "Packages × pack size ≥ monthly grams for every food",
+        run() {
+          const checks = [];
+          // Check every food in every plan the tests made
+          for (const name of ["defaults", "budget500", "noTuna", "tunaSet", "eggsMin", "test9", "realistic", "highQuality", "varietyStress"]) {
+            const plan = scenarios[name]();
+            if (plan.status !== "optimal") continue;
+            const packOf = (id) => foods.find((f) => f.id === id).packGrams;
+            const bad = plan.items.filter((i) => i.packages * packOf(i.id) < i.monthlyGrams - EPS);
+            checks.push([
+              `${name}: ${plan.items.length} foods, ${bad.length ? "short: " + bad.map((i) => i.id).join(", ") : "all covered"}`,
+              bad.length === 0,
+            ]);
+          }
+          // Show what rounding looks like in the default plan
+          const plan = scenarios.defaults();
+          const notes = plan.status === "optimal"
+            ? plan.items.map((i) =>
+                `${i.name}: ${fmt(i.gramsPerDay)} g/day × ${DEFAULTS.days} = ${fmt(i.monthlyGrams)} g → ` +
+                `${i.packages} pack(s), ${fmt(i.leftoverGrams)} g left over`)
+            : [];
+          return { plan, checks, notes };
+        },
+      },
+      {
+        title: "Protein ratings",
+        expected: "keso, kvarg, tuna, tofu = Excellent; eggs, lentils, salmon = OK; peanut butter, oats, rice = Poor",
+        run(app) {
+          const expected = {
+            keso: "excellent", kvarg: "excellent", tuna_can: "excellent", tuna_frozen: "excellent", tofu: "excellent",
+            eggs: "ok", lentils_red: "ok", salmon_frozen: "ok",
+            peanut_butter: "poor", oats: "poor", rice: "poor",
+          };
+          const checks = [];
+          for (const [id, want] of Object.entries(expected)) {
+            const f = foods.find((x) => x.id === id);
+            const got = Optimizer.proteinRating(f);
+            checks.push([`${id} = ${want} (optimizer.js says ${got})`, got === want]);
+          }
+          // app.js has its own copy of the rule: it must agree on every food
+          const differ = foods.filter((f) => app.proteinRating(f) !== Optimizer.proteinRating(f));
+          checks.push([
+            `app.js and optimizer.js agree on all ${foods.length} foods` +
+              (differ.length ? ` (differ: ${differ.map((f) => f.id).join(", ")})` : ""),
+            differ.length === 0,
+          ]);
+          return { checks };
+        },
+      },
+      {
+        title: "Calorie-dense foods + keso and tuna",
+        expected: "≥ 60% of protein from Excellent foods; Poor foods ≤ 40% of kcal",
+        run() {
+          const plan = scenarios.test9();
+          const q = plan.quality;
+          const noRules = scenarios.test9NoRules();
+          const notes = noRules.status === "optimal"
+            ? [
+                `Without the quality rules, the same foods give only ${pct(noRules.quality.proteinShare.excellent)} ` +
+                  `of protein from Excellent foods and ${pct(noRules.quality.kcalShare.poor)} of kcal from Poor foods.`,
+              ]
+            : [];
+          return {
+            plan,
+            checks: [
+              ["solution found", plan.status === "optimal"],
+              [`≥ 60% of protein from Excellent (got ${q ? pct(q.proteinShare.excellent) : "–"})`, Boolean(q) && q.proteinShare.excellent >= 0.6 - EPS],
+              [`Poor foods ≤ 40% of kcal (got ${q ? pct(q.kcalShare.poor) : "–"})`, Boolean(q) && q.kcalShare.poor <= 0.4 + EPS],
+            ],
+            notes,
+          };
+        },
+      },
+      {
+        title: "Only peanut butter, oats, lentils and rice",
+        expected: "Infeasible, with the \"tick more Excellent protein foods\" message",
+        run() {
+          const plan = scenarios.poorOnly();
+          const problem = (plan.problems || []).find((p) => p.code === "excellent");
+          return {
+            plan,
+            checks: [
+              ["infeasible", plan.status === "infeasible"],
+              ["has the 'too few Excellent protein foods' message", Boolean(problem) && /Excellent/.test(problem.message)],
+              ["it's the first (main) message", Boolean(plan.problems) && plan.problems[0].code === "excellent"],
+            ],
+          };
+        },
+      },
+      {
+        title: "Lifts/dilutes and target density (app.js)",
+        expected:
+          "Fixed 10 g / 100 kcal: keso and tuna lift; eggs, lentils, chickpeas, oats dilute. " +
+          "110 g / 1,700 kcal → 6.5; protein 150 changes only the info line",
+        async run(app) {
+          const checks = [];
+          const byId = (id) => foods.find((f) => f.id === id);
+          // Fixed lifts/dilutes labels
+          for (const id of ["keso", ...TUNA]) {
+            const got = app.liftsOrDilutes(byId(id));
+            checks.push([`${id} lifts (got "${got}")`, got === "lifts"]);
+          }
+          for (const id of ["eggs", "lentils_red", "chickpeas_can", "oats"]) {
+            const got = app.liftsOrDilutes(byId(id));
+            checks.push([`${id} dilutes (got "${got}")`, got.startsWith("dilutes")]);
+          }
+          // Target density, as a pure calculation
+          const d110 = app.targetDensity({ protein: 110, kcal: 1700 }).toFixed(1);
+          checks.push([`target density 110 / 1,700 = 6.5 (got ${d110})`, d110 === "6.5"]);
+
+          // On the real page: change protein from 110 to 150 and see what changes
+          const page = await pageChange(app, 150);
+          checks.push([`info line: ${page.before.info} → ${page.after.info} (expected 6.5 → 8.8)`,
+            page.before.info === "6.5" && page.after.info === "8.8"]);
+          checks.push([`no food label changed (${page.after.labels.length} labels compared)`,
+            page.after.labels.length > 0 && page.after.labels.join() === page.before.labels.join()]);
+          return { checks };
+        },
+      },
+      {
+        title: "Three plans, default settings",
+        expected:
+          "All three give valid plans: kcal 1,615–1,700; protein ≥ 110 / 115 / 130; " +
+          "≥ 60% / 60% / 80% of protein from Excellent; Poor ≤ 40% of kcal",
+        run() {
+          const plans = scenarios.three();
+          const checks = [];
+          for (const key of THREE) {
+            const p = plans[key];
+            const name = p.title;
+            if (p.status !== "optimal") {
+              checks.push([`${name}: no plan (${p.messages.join(" ")})`, false]);
+              continue;
+            }
+            const t = p.totals;
+            const target = PLAN_TARGETS[key];
+            checks.push([`${name}: kcal ${fmt(t.kcalPerDay)} within 1,615–1,700`, t.kcalPerDay >= 1615 - EPS && t.kcalPerDay <= 1700 + EPS]);
+            checks.push([`${name}: protein ${fmt(t.proteinPerDay, 1)} ≥ ${target.protein}`, t.proteinPerDay >= target.protein - EPS]);
+            checks.push([
+              `${name}: ${pct(p.quality.proteinShare.excellent)} of protein from Excellent (≥ ${pct(target.excellent, 0)})`,
+              p.quality.proteinShare.excellent >= target.excellent - EPS,
+            ]);
+            checks.push([`${name}: ${pct(p.quality.kcalShare.poor)} of kcal from Poor (≤ 40%)`, p.quality.kcalShare.poor <= 0.4 + EPS]);
+            checks.push([`${name}: food count ${t.foodCount} matches the list`, t.foodCount === p.items.length && t.foodCount > 0]);
+          }
+          return { checks };
+        },
+      },
+      {
+        title: "Cost order of the three plans",
+        expected: "Plan 1 ≤ plan 2 ≤ plan 3 ≤ budget (4,000 kr)",
+        run() {
+          const plans = scenarios.three();
+          const ok = THREE.every((k) => plans[k].status === "optimal");
+          const [c1, c2, c3] = THREE.map((k) => (plans[k].totals ? plans[k].totals.shoppingCost : NaN));
+          return {
+            checks: [
+              ["all three plans exist", ok],
+              [`absolute cheapest ${fmt(c1)} kr ≤ cheapest realistic ${fmt(c2)} kr`, c1 <= c2],
+              [`cheapest realistic ${fmt(c2)} kr ≤ high quality ${fmt(c3)} kr`, c2 <= c3],
+              [`high quality ${fmt(c3)} kr ≤ budget ${DEFAULTS.budget} kr`, c3 <= DEFAULTS.budget],
+            ],
+          };
+        },
+      },
+      {
+        title: "Floor per food in plans 2 and 3",
+        expected: "Every food in plans 2 and 3 is 0 or at least 35 g a day (fats: at least 10 g)",
+        run() {
+          const checks = [];
+          for (const key of ["realistic", "highQuality"]) {
+            const p = scenarios[key]();
+            if (p.status !== "optimal") {
+              checks.push([`${p.title}: no plan`, false]);
+              continue;
+            }
+            // Each food's floor: its own minGramsIfUsed from foods.json, otherwise 35 g
+            const floorOf = (i) => {
+              const own = foodOf(i).minGramsIfUsed;
+              return typeof own === "number" ? own : RULES.minGramsIfUsed;
+            };
+            const small = p.items.filter((i) => i.gramsPerDay < floorOf(i) - EPS);
+            const amounts = p.items.map((i) => `${i.id} ${fmt(i.gramsPerDay)}/${floorOf(i)}`).join(", ");
+            checks.push([
+              `${p.title}: all foods at or above their floor` +
+                (small.length ? ` (too small: ${small.map((i) => i.id).join(", ")})` : ""),
+              small.length === 0,
+            ]);
+            checks.push([`${p.title} (g / floor): ${amounts}`, true]);
+          }
+          // Plan 1 has no floor; show its smallest amount for comparison
+          const p1 = scenarios.three().cheapest;
+          const notes = p1.status === "optimal"
+            ? [`For comparison, the absolute cheapest plan's smallest amount is ${fmt(Math.min(...p1.items.map((i) => i.gramsPerDay)), 1)} g.`]
+            : [];
+          return { checks, notes };
+        },
+      },
+      {
+        title: "Realistic max limits in plans 2 and 3",
+        expected: "Plans 2 and 3 respect realisticMaxGramsPerDay (tofu 150, canned tuna 120, Oumph 150, kvarg 300); plan 1 keeps the normal max",
+        run() {
+          const gramsIn = (p, id) => (p.status === "optimal" ? (p.items.find((i) => i.id === id) || { gramsPerDay: 0 }).gramsPerDay : NaN);
+          // Every food that has a realistic max in foods.json
+          const limited = foods.filter((f) => typeof f.realisticMaxGramsPerDay === "number");
+          const checks = [];
+          for (const key of ["realistic", "highQuality"]) {
+            const p = scenarios[key]();
+            const over = limited.filter((f) => !(gramsIn(p, f.id) <= f.realisticMaxGramsPerDay + EPS));
+            checks.push([
+              `${p.title}: ` + limited.map((f) => `${f.id} ${fmt(gramsIn(p, f.id))}/${f.realisticMaxGramsPerDay}`).join(", "),
+              p.status === "optimal" && over.length === 0,
+            ]);
+          }
+          const p1 = scenarios.three().cheapest;
+          const over1 = limited.filter((f) => !(gramsIn(p1, f.id) <= f.maxGramsPerDay + EPS));
+          checks.push([
+            "Absolute cheapest (normal max): " + limited.map((f) => `${f.id} ${fmt(gramsIn(p1, f.id))}/${f.maxGramsPerDay}`).join(", "),
+            p1.status === "optimal" && over1.length === 0,
+          ]);
+          return { checks };
+        },
+      },
+      {
+        title: "Protein targets of plans 2 and 3",
+        expected: "Plan 2 protein ≥ 110 + 5 = 115 g; plan 3 protein ≥ 110 + 20 = 130 g with ≥ 80% from Excellent foods",
+        run() {
+          const p2 = scenarios.realistic();
+          const p3 = scenarios.highQuality();
+          const g2 = p2.totals ? p2.totals.proteinPerDay : NaN;
+          const g3 = p3.totals ? p3.totals.proteinPerDay : NaN;
+          const e3 = p3.quality ? p3.quality.proteinShare.excellent : NaN;
+          return {
+            plan: p3,
+            checks: [
+              [`Cheapest realistic: ${fmt(g2, 1)} g ≥ 115`, g2 >= 115 - EPS],
+              [`High quality: ${fmt(g3, 1)} g ≥ 130`, g3 >= 130 - EPS],
+              [`High quality: ${pct(e3)} of protein from Excellent (≥ 80%)`, e3 >= 0.8 - EPS],
+            ],
+          };
+        },
+      },
+      {
+        title: "Budget 1,300 kr: below the cheapest realistic plan",
+        expected: "Plan 2 is shown with an over-budget message; plan 3 explains that no realistic plan fits",
+        run() {
+          const plans = scenarios.threeLowBudget();
+          const p2 = plans.realistic;
+          const p3 = plans.highQuality;
+          return {
+            plan: p3,
+            checks: [
+              ["Cheapest realistic: plan still shown", p2.status === "optimal"],
+              ["Cheapest realistic: over-budget message", p2.messages.some((m) => m.includes("over budget"))],
+              ["High quality: no plan", p3.status === "infeasible"],
+              ["High quality: says the budget is below the cheapest realistic plan",
+                p3.messages.some((m) => m.includes("less than the cheapest realistic plan"))],
+            ],
+            notes: p2.messages.map((m) => "Cheapest realistic: " + m),
+          };
+        },
+      },
+      {
+        title: "At least 10 foods in plans 2 and 3",
+        expected: "Plans 2 and 3 each contain at least 10 different foods",
+        run() {
+          const checks = ["realistic", "highQuality"].map((key) => {
+            const p = scenarios[key]();
+            const n = p.status === "optimal" ? p.totals.foodCount : 0;
+            return [`${p.title}: ${n} foods ≥ ${RULES.minFoods}`, n >= RULES.minFoods];
+          });
+          const p1 = scenarios.three().cheapest;
+          return {
+            checks,
+            notes: p1.status === "optimal" ? [`For comparison, the absolute cheapest plan has ${p1.totals.foodCount} foods.`] : [],
+          };
+        },
+      },
+      {
+        title: "Food-group limits in plans 2 and 3",
+        expected: "Dairy ≤ 700 g a day; rice + pasta + bulgur + oats ≤ 200 g dry a day (from data/groups.json)",
+        run() {
+          const checks = [];
+          checks.push([`groups.json has ${groups.length} groups`, groups.length >= 2]);
+          for (const key of ["realistic", "highQuality"]) {
+            const p = scenarios[key]();
+            for (const g of groups) {
+              const used = p.status === "optimal" ? groupGrams(p, g.id) : NaN;
+              checks.push([`${p.title}: ${g.id} ${fmt(used)} g ≤ ${g.maxGramsPerDay}`, used <= g.maxGramsPerDay + EPS]);
+            }
+          }
+          // Every group must have members in foods.json, or the limit does nothing
+          for (const g of groups) {
+            const members = foods.filter((f) => f.limitGroup === g.id).map((f) => f.id);
+            checks.push([`${g.id} members: ${members.join(", ") || "none"}`, members.length > 0]);
+          }
+          return { checks };
+        },
+      },
+      {
+        title: "Budget 1,500 kr: high quality plan over budget",
+        expected: "Plans 1 and 2 fit; plan 3 has no plan and says what it would cost and how far over budget",
+        run() {
+          const plans = scenarios.threeMidBudget();
+          const p3 = plans.highQuality;
+          const problem = (p3.problems || []).find((p) => p.code === "budget");
+          return {
+            plan: p3,
+            checks: [
+              ["Absolute cheapest fits the budget", plans.cheapest.status === "optimal" && !plans.cheapest.totals.overBudget],
+              ["Cheapest realistic fits the budget", plans.realistic.status === "optimal" && !plans.realistic.totals.overBudget],
+              ["High quality: no plan", p3.status === "infeasible"],
+              [
+                `High quality: says it would cost ${problem ? fmt(problem.cost) : "?"} kr, over the budget`,
+                Boolean(problem) && problem.cost > 1500 && problem.message.includes(`costs ${fmt(problem.cost)} kr`),
+              ],
+            ],
+          };
+        },
+      },
+      {
+        title: "Only 9 foods ticked",
+        expected: "Plan 1 still works; plans 2 and 3 say they need at least 10 different foods",
+        run() {
+          const plans = scenarios.nineFoods();
+          const says10 = (p) => p.status === "infeasible" && p.problems.some((x) => x.code === "minFoods");
+          return {
+            plan: plans.realistic,
+            checks: [
+              ["Absolute cheapest: plan found", plans.cheapest.status === "optimal"],
+              ["Cheapest realistic: 'at least 10 foods' message", says10(plans.realistic)],
+              ["High quality: 'at least 10 foods' message", says10(plans.highQuality)],
+              ["no misleading extra reasons", plans.realistic.problems && plans.realistic.problems.length === 1],
+            ],
+          };
+        },
+      },
+    ];
+
+    // Draw the three default plans next to each other
+    function renderComparison() {
+      const plans = scenarios.three();
+      const cols = THREE.map((k) => plans[k]);
+      // One table row: a label, then one cell per plan
+      const row = (label, cell) =>
+        `<tr><th scope="row">${esc(label)}</th>${cols.map((p) => `<td>${p.status === "optimal" ? cell(p) : "–"}</td>`).join("")}</tr>`;
+      let html = `<h2>Default plans side by side</h2><div class="compare-wrap"><table class="compare"><thead><tr><th></th>`;
+      html += cols.map((p) => `<th scope="col">${esc(p.title)}</th>`).join("") + `</tr></thead><tbody>`;
+      html += row("Total cost", (p) => `${fmt(p.totals.shoppingCost)} kr`);
+      html += row("Protein / day", (p) => `${fmt(p.totals.proteinPerDay, 1)} g`);
+      html += row("kcal / day", (p) => fmt(p.totals.kcalPerDay));
+      html += row("Protein from Excellent", (p) => pct(p.quality.proteinShare.excellent));
+      html += row("Number of foods", (p) => String(p.totals.foodCount));
+      for (const g of groups) html += row(`${g.id} (max ${g.maxGramsPerDay} g)`, (p) => `${fmt(groupGrams(p, g.id))} g`);
+      html += row("Foods (g/day · packs)", (p) =>
+        `<ul>${p.items.map((i) => `<li>${esc(i.name)}: ${fmt(i.gramsPerDay)} g · ${i.packages} × ${fmt(i.cost)} kr</li>`).join("")}</ul>`);
+      html += row("Messages", (p) => esc(p.messages.join(" ") || "–"));
+      html += `</tbody></table></div>`;
+      // Plans with no solution: show why under the table
+      for (const p of cols) {
+        if (p.status !== "optimal") html += `<p class="bad">${esc(p.title)}: ${esc(p.messages.join(" "))}</p>`;
+      }
+      return html;
+    }
+
+    // Type protein values into the hidden page and read the info line and food labels.
+    // The page saves settings to localStorage when they change, so the real saved
+    // settings are put back afterwards.
+    async function pageChange(app, newProtein) {
+      const doc = app.document;
+      const saved = app.localStorage.getItem("pbp.settings");
+      // Set an input and fire the same event typing would
+      const setInput = (id, value) => {
+        const input = doc.getElementById(id);
+        input.value = value;
+        input.dispatchEvent(new app.Event("input", { bubbles: true }));
+      };
+      // What the page shows right now
+      const read = () => ({
+        info: doc.getElementById("target-density").textContent,
+        labels: [...doc.querySelectorAll(".food-stats .lifts, .food-stats .dilutes")].map(
+          (el) => el.closest("li").querySelector("input").dataset.id + ":" + el.className),
+      });
+      try {
+        setInput("kcal", 1700);
+        setInput("protein", 110);
+        const before = read();
+        setInput("protein", newProtein);
+        const after = read();
+        return { before, after };
+      } finally {
+        // Put the user's own saved settings back
+        if (saved === null) app.localStorage.removeItem("pbp.settings");
+        else app.localStorage.setItem("pbp.settings", saved);
+      }
+    }
+
+    // Wait until the hidden page has loaded app.js and drawn its food list
+    function waitForApp() {
+      const frame = document.getElementById("app-frame");
+      return new Promise((resolve, reject) => {
+        const started = Date.now();
+        const check = () => {
+          const win = frame.contentWindow;
+          const ready = win && win.document && win.document.querySelector("#food-list .food");
+          if (ready && typeof win.proteinRating === "function") return resolve(win);
+          if (Date.now() - started > 8000) return reject(new Error("index.html / app.js didn't load in the hidden frame"));
+          setTimeout(check, 100);
+        };
+        check();
+      });
+    }
+
+    // Escape text before putting it into HTML
+    const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+    // Draw one test card
+    function renderTest(num, test, outcome) {
+      const pass = outcome.checks.length > 0 && outcome.checks.every(([, ok]) => ok);
+      const plan = outcome.plan;
+      let html = `<section class="test ${pass ? "pass" : "fail"}">`;
+      html += `<h2><span class="verdict">${pass ? "PASS" : "FAIL"}</span>${num}. ${esc(test.title)}</h2>`;
+      html += `<p class="muted">Expected: ${esc(test.expected)}</p>`;
+      if (plan) html += `<p class="numbers">${esc(numbersOf(plan))}</p>`;
+      if (plan && plan.messages && plan.messages.length) {
+        html += `<p>Messages:</p><ul>${plan.messages.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>`;
+      }
+      html += `<ul>${outcome.checks
+        .map(([label, ok]) => `<li class="${ok ? "ok" : "bad"}">${ok ? "✔" : "✘"} ${esc(label)}</li>`)
+        .join("")}</ul>`;
+      if (outcome.notes && outcome.notes.length) {
+        html += `<ul class="muted">${outcome.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>`;
+      }
+      html += `</section>`;
+      return { html, pass };
+    }
+
+    // Load the data, run every test in order and show the results
+    async function runAll() {
+      const results = document.getElementById("results");
+      const summary = document.getElementById("summary");
+      try {
+        if (typeof solver === "undefined") throw new Error("javascript-lp-solver didn't load from the CDN (offline?)");
+        const response = await fetch("data/foods.json");
+        if (!response.ok) throw new Error(`data/foods.json: HTTP ${response.status}`);
+        foods = await response.json();
+        const groupsResponse = await fetch("data/groups.json");
+        if (!groupsResponse.ok) throw new Error(`data/groups.json: HTTP ${groupsResponse.status}`);
+        groups = await groupsResponse.json();
+      } catch (err) {
+        summary.textContent = `Couldn't start: ${err.message}. Run python3 -m http.server and open http://localhost:8000/test.html`;
+        summary.className = "fail";
+        return;
+      }
+
+      // Show the three default plans next to each other before the test cards
+      try {
+        document.getElementById("compare").innerHTML = renderComparison();
+      } catch (err) {
+        document.getElementById("compare").innerHTML = `<p class="bad">Couldn't build the three plans: ${esc(err.message)}</p>`;
+      }
+
+      // The hidden app page is only needed by tests 8 and 11; if it fails, those two fail
+      let app = null;
+      let appError = null;
+      try {
+        app = await waitForApp();
+      } catch (err) {
+        appError = err;
+      }
+
+      let passed = 0;
+      let html = "";
+      for (let i = 0; i < TESTS.length; i++) {
+        const test = TESTS[i];
+        let outcome;
+        try {
+          // Tests that take an argument need app.js
+          if (test.run.length > 0 && !app) throw appError;
+          outcome = await test.run(app);
+        } catch (err) {
+          // A crash counts as a failure, with the error shown
+          outcome = { checks: [[`error: ${err.message}`, false]] };
+        }
+        const card = renderTest(i + 1, test, outcome);
+        if (card.pass) passed++;
+        html += card.html;
+      }
+      results.innerHTML = html;
+      summary.textContent = `${passed} / ${TESTS.length} passed`;
+      summary.className = passed === TESTS.length ? "pass" : "fail";
+    }
+
+    runAll();
+  </script>
+</body>
+</html>

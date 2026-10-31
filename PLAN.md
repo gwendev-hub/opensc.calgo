@@ -75,6 +75,27 @@ Derived in code, not stored:
 
 `maxGramsPerDay` is a sensible default so the optimizer doesn't suggest 600 g of lentils a day. Users can override it.
 
+### Optional fields for the realistic plans (plans 2 and 3, section 5)
+Only some foods have these. Plan 1 ignores them.
+
+| Field | Meaning | Foods that have it |
+|---|---|---|
+| `realisticMaxGramsPerDay` | A stricter max per day for plans 2 and 3. Plan 1 keeps `maxGramsPerDay`. A user's own max always wins. | tofu 150, canned tuna 120, Oumph 150, kvarg 300 |
+| `minGramsIfUsed` | The floor if the food is in plan 2 or 3 at all (0 or at least this many grams). Without it the floor is 35 g. | oil 10, peanut butter 10 |
+| `limitGroup` | The id of a food group in `data/groups.json` whose total limit this food counts towards. | dairy: keso, kvarg, Greek yoghurt, Lindahls drink, milk, prästost · dry_grains: rice, pasta, bulgur, oats |
+
+### Food-group limits – `data/groups.json`
+Limits on the **total** grams per day of several foods together, so the plan can't stack e.g. keso + kvarg + yoghurt + milk. Used by plans 2 and 3 only. Members are the foods whose `limitGroup` is the group's `id`.
+
+```json
+[
+  { "id": "dairy", "name": "Dairy (keso, kvarg, yoghurt, drinks, milk, cheese)", "maxGramsPerDay": 700 },
+  { "id": "dry_grains", "name": "Dry grains (rice, pasta, bulgur, oats)", "maxGramsPerDay": 200 }
+]
+```
+
+It's a separate file so `foods.json` stays a plain list. Eggs aren't in dairy; bread and hönökaka aren't in dry grains (they're weighed ready to eat).
+
 ### Starter food list (~30 items, prices are rough estimates to be checked once in Willys/ICA online)
 
 | id | Food | Pack | Price kr | kcal/100g | Protein/100g | Default max/day |
@@ -184,10 +205,34 @@ For each ticked food *i*, the variable is **xᵢ = grams per day**.
 - Calories within a range: `Σ kcalᵢ · xᵢ/100 ≥ kcalTarget × 0.95` and `≤ kcalTarget`
 - Protein minimum: `Σ proteinᵢ · xᵢ/100 ≥ proteinMin`
 - Per-food limits: `minᵢ ≤ xᵢ ≤ maxᵢ` (min defaults to 0)
-- **Variety:** no single food gives more than 35% of total calories (`kcalᵢ · xᵢ/100 ≤ 0.35 × kcalTarget`). Without this, the cheapest answer is boring, e.g. mostly lentils and oats.
+- **Variety:** no single food gives more than 35% of total calories (`kcalᵢ · xᵢ/100 − 0.35 · Σ_all kcalⱼ·xⱼ/100 ≤ 0`). Without this, the cheapest answer is boring, e.g. mostly lentils and oats.
 - **Protein quality (section 4.3)**, written so it stays linear:
   - Excellent share: `Σ_{i∈Excellent} proteinᵢ·xᵢ/100 − 0.60 · Σ_all proteinᵢ·xᵢ/100 ≥ 0`
-  - Poor calorie cap: `Σ_{i∈Poor} kcalᵢ·xᵢ/100 ≤ 0.40 × kcalTarget`
+  - Poor calorie cap: `Σ_{i∈Poor} kcalᵢ·xᵢ/100 − 0.40 · Σ_all kcalᵢ·xᵢ/100 ≤ 0`
+- The variety and Poor caps are measured against the plan's **actual** total calories, not the target. Total calories are never above the target, so this is never looser than `≤ 0.35 / 0.40 × kcalTarget`, and "35% / 40% of calories" is exactly true in the result.
+
+### Three plans
+The optimizer makes three plans from the same settings and ticked foods (`Optimizer.planAll(settings, foods, groups)`, where `groups` comes from `data/groups.json`), so the user can compare them. All three minimise cost.
+
+| | Plan 1 – **Absolute cheapest** | Plan 2 – **Cheapest realistic** | Plan 3 – **High quality** |
+|---|---|---|---|
+| Calories 95–100%, variety cap (35% per food), Poor ≤ 40% of kcal, per-food max | ✔ | ✔ | ✔ |
+| Protein minimum | `proteinMin` (110 g) | `proteinMin` + 5 g buffer (115 g) | `proteinMin` + 20 g (130 g) |
+| Protein from Excellent foods | ≥ 60% | ≥ 60% | **≥ 80%** |
+| Floor per food | none | each food is **0 or ≥ 35 g/day** (fats: 0 or ≥ 10 g, `minGramsIfUsed`) | same as plan 2 |
+| At least 10 different foods | – | ✔ | ✔ |
+| Realistic max limits (`realisticMaxGramsPerDay`) | – | ✔ | ✔ |
+| Food-group limits (`data/groups.json`) | – | ✔ dairy ≤ 700 g, dry grains ≤ 200 g | ✔ |
+| Budget | compared after solving | compared after solving | **ceiling: total cost ≤ monthly budget**, otherwise no plan |
+
+- **0 or ≥ 35 g** can't be written as a plain linear rule, so each food gets a yes/no (binary) variable `useᵢ`: `xᵢ − floorᵢ · useᵢ ≥ 0` and `xᵢ − maxᵢ · useᵢ ≤ 0`, where `floorᵢ` is 35 g or the food's `minGramsIfUsed`. The solver then does branch and bound, which takes well under a second for the starter list.
+- **At least 10 foods** uses the same yes/no variables: `Σ useᵢ ≥ 10`.
+- **Food-group limits:** `Σ_{i∈group} xᵢ ≤ group max` for each group in `data/groups.json`.
+- **Plan 3 and rounding:** the solver budget is `budget / days` kr per day, but rounding up to whole packs costs a bit more. If the rounded cost goes over budget, plan 3 is solved again with the daily cap lowered by the overshoot (up to 8 tries).
+- The buffer (5 g), plan 3's extra protein (+20 g) and Excellent share (80%), the 35 g floor and the 10 foods are defaults in `Optimizer.DEFAULT_RULES`, to be changeable later under "Advanced".
+- The cost order should be **plan 1 ≤ plan 2 ≤ plan 3 ≤ budget**, because each plan has the same rules as the one before, plus more. That's guaranteed for the solver's cost; rounding up to whole packs could in rare cases swap two plans, so test 13 checks it.
+- The cheapest way to meet "10 foods" is often to add a few foods at exactly 35 g (e.g. 35 g of potatoes). That's expected; watch whether it looks silly in real use.
+- Every plan returns: its foods with grams per day and packages, total cost, protein and kcal per day, % of protein from Excellent foods, number of foods, and a message if it isn't possible or is over budget.
 
 ### After solving
 1. Monthly grams = `xᵢ × days`.
@@ -200,7 +245,8 @@ Never just say "no solution". Tell the user why:
 1. Check whether the protein and calorie targets are reachable at all with the ticked foods and max limits. If not, say: *"With these foods you can reach at most X g protein within Y kcal. Tick more high-protein foods or raise the max limits."*
    - If the protein quality rules are what blocks it, say so: *"You've ticked too few Excellent protein foods to get 60% of your protein from them. Tick e.g. keso, kvarg, tuna or tofu."*
 2. If they're reachable but the cheapest solution is over budget, say: *"The cheapest plan costs Z kr, which is W kr over budget."* Still show that plan.
-3. Optional: solve again as **"most protein within budget and calories"** and show it as an alternative.
+3. **Plans 2 and 3** first check the food count: *"This plan needs at least 10 different foods, but only N are ticked. Tick more foods."* Then, if the plan fails even without the floor, 10 foods and group limits, they run the checks in point 1 with their own targets (115 g or 130 g protein, 60% or 80% Excellent, realistic max limits). Otherwise it's the realistic rules together: *"The realistic rules … can't all be met with these foods at X g protein. Tick a few more foods."*
+4. **Plan 3** has no plan if plan 2 has none (same reasons), if the budget is below plan 2's cost (*"Your budget of X kr is less than the cheapest realistic plan (Y kr), so no realistic plan fits. Raise the budget or tick cheaper foods."*), or if the high quality plan costs more than the budget: *"The high quality plan costs X kr, which is W kr over your budget of B kr."*
 
 ### v0.1 improvement (only if rounding causes problems)
 Switch the variables to **whole packages per month**, using integer variables in the same solver. Then the budget is exact and nothing needs rounding. Do this only after v0 works.
@@ -212,13 +258,14 @@ Switch the variables to **whole packages per month**, using integer variables in
 1. **Settings card:** budget, kcal, protein, days. Large inputs with sensible defaults (4,000 kr, 1,700 kcal, 110 g, 30 days).
 2. **Foods list:** grouped by category, each food with a checkbox, its rating badge (green, yellow or red), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. Tapping a food opens its min/max fields (advanced, hidden by default).
 3. **"Make my grocery list" button**
-4. **Result card:**
+4. **Three comparison cards** (section 5, "Three plans"), side by side on a wide screen and stacked on a phone: *Absolute cheapest*, *Cheapest realistic*, *High quality*. Each card shows total cost vs the budget, protein and kcal per day, % of protein from Excellent foods and the number of foods, or the message saying why that plan isn't possible. Tapping a card opens its result card below.
+5. **Result card** (for the chosen plan):
    - Top line: **Total 3,420 kr of 4,000 kr ✔** · **112 g protein/day** · **1,690 kcal/day**
    - Grocery table: food, rating badge, packages, amount per day, cost
    - **Protein quality** section (section 4.4)
    - A "Copy list" button that copies plain text to paste into Notes or a message
    - Warnings, such as infeasible plans or large leftovers
-5. **Footer:** where the prices come from and their date, a "not medical advice" note, and a feedback link.
+6. **Footer:** where the prices come from and their date, a "not medical advice" note, and a feedback link.
 
 ---
 
@@ -257,6 +304,18 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 9 | Peanut butter, oats, lentils, rice + keso and tuna ticked | ≥ 60% of protein from Excellent foods; Poor foods ≤ 40% of kcal |
 | 10 | Only peanut butter, oats, lentils and rice ticked | Infeasible, with the "tick more Excellent protein foods" message |
 | 11 | Lifts/dilutes and target density | Lifts/dilutes uses the fixed 10 g per 100 kcal: keso and tuna "lift"; eggs, lentils, chickpeas and oats "dilute". Target density 110 g / 1,700 kcal → 6.5 g per 100 kcal (info only); changing protein to 150 changes only the info line, no food's label |
+| 12 | Three plans, default settings | All three give valid plans: kcal 1,615–1,700; protein ≥ 110 / 115 / 130; ≥ 60% / 60% / 80% of protein from Excellent; Poor ≤ 40% of kcal |
+| 13 | Cost order, default settings | Plan 1 ≤ plan 2 ≤ plan 3 ≤ budget |
+| 14 | Floor per food | No food in plans 2 and 3 is between 0 and 35 g a day (fats with `minGramsIfUsed`: between 0 and 10 g) |
+| 15 | Realistic max | Plans 2 and 3 respect every `realisticMaxGramsPerDay` (tofu 150, canned tuna 120, Oumph 150, kvarg 300); plan 1 keeps `maxGramsPerDay` |
+| 16 | Protein targets | Plan 2 protein ≥ 115 g; plan 3 protein ≥ 130 g and ≥ 80% from Excellent foods |
+| 17 | Budget 1,300 kr (below the cheapest realistic plan) | Plan 2 shown with an over-budget message; plan 3 says no realistic plan fits the budget |
+| 18 | Food count | Plans 2 and 3 each have at least 10 different foods |
+| 19 | Food-group limits | In plans 2 and 3: dairy ≤ 700 g/day; rice + pasta + bulgur + oats ≤ 200 g dry/day; every group in `groups.json` has members |
+| 20 | Budget 1,500 kr (between plan 2 and plan 3) | Plans 1 and 2 fit; plan 3 has no plan and says what it would cost and how far over budget |
+| 21 | Only 9 foods ticked | Plan 1 still works; plans 2 and 3 say they need at least 10 different foods (and nothing misleading) |
+
+"Tuna" in tests 4, 8 and 9 means both tuna products (canned and frozen). Test 4 also uses a food set where tuna is normally picked, and test 6 adds a stress case (quality rules off, every max × 10) so the variety cap actually has to do something. `test.html` also shows the three default plans side by side.
 
 ---
 

@@ -9,6 +9,7 @@
     "kcalPer100g": 110,
     "proteinPer100g": 24,
     "maxGramsPerDay": 240,
+    "realisticMaxGramsPerDay": 120,
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -87,6 +88,7 @@
     "kcalPer100g": 96,
     "proteinPer100g": 12,
     "maxGramsPerDay": 300,
+    "limitGroup": "dairy",
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -100,6 +102,8 @@
     "kcalPer100g": 60,
     "proteinPer100g": 11,
     "maxGramsPerDay": 400,
+    "realisticMaxGramsPerDay": 300,
+    "limitGroup": "dairy",
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -113,6 +117,7 @@
     "kcalPer100g": 55,
     "proteinPer100g": 10,
     "maxGramsPerDay": 300,
+    "limitGroup": "dairy",
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -126,6 +131,7 @@
     "kcalPer100g": 50,
     "proteinPer100g": 7.6,
     "maxGramsPerDay": 680,
+    "limitGroup": "dairy",
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -139,6 +145,7 @@
     "kcalPer100g": 47,
     "proteinPer100g": 3.5,
     "maxGramsPerDay": 500,
+    "limitGroup": "dairy",
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -152,6 +159,7 @@
     "kcalPer100g": 390,
     "proteinPer100g": 26,
     "maxGramsPerDay": 40,
+    "limitGroup": "dairy",
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -165,6 +173,7 @@
     "kcalPer100g": 130,
     "proteinPer100g": 14,
     "maxGramsPerDay": 250,
+    "realisticMaxGramsPerDay": 150,
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -178,6 +187,7 @@
     "kcalPer100g": 140,
     "proteinPer100g": 20,
     "maxGramsPerDay": 200,
+    "realisticMaxGramsPerDay": 150,
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -243,6 +253,7 @@
     "kcalPer100g": 370,
     "proteinPer100g": 13,
     "maxGramsPerDay": 100,
+    "limitGroup": "dry_grains",
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -256,6 +267,7 @@
     "kcalPer100g": 350,
     "proteinPer100g": 7,
     "maxGramsPerDay": 150,
+    "limitGroup": "dry_grains",
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -269,6 +281,7 @@
     "kcalPer100g": 350,
     "proteinPer100g": 12,
     "maxGramsPerDay": 150,
+    "limitGroup": "dry_grains",
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -282,6 +295,7 @@
     "kcalPer100g": 355,
     "proteinPer100g": 12,
     "maxGramsPerDay": 150,
+    "limitGroup": "dry_grains",
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -386,6 +400,7 @@
     "kcalPer100g": 600,
     "proteinPer100g": 25,
     "maxGramsPerDay": 30,
+    "minGramsIfUsed": 10,
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
@@ -425,6 +440,7 @@
     "kcalPer100g": 884,
     "proteinPer100g": 0,
     "maxGramsPerDay": 20,
+    "minGramsIfUsed": 10,
     "priceSource": "Estimate, Oct 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   }

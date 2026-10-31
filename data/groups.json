@@ -1,0 +1,12 @@
+[
+  {
+    "id": "dairy",
+    "name": "Dairy (keso, kvarg, yoghurt, drinks, milk, cheese)",
+    "maxGramsPerDay": 700
+  },
+  {
+    "id": "dry_grains",
+    "name": "Dry grains (rice, pasta, bulgur, oats)",
+    "maxGramsPerDay": 200
+  }
+]
