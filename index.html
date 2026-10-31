@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- Basic page setup: text encoding and phone-friendly scaling -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Protein Budget Planner</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <!-- Page title and one-line explanation -->
+    <header>
+      <h1>Protein Budget Planner</h1>
+      <p class="subtitle">The cheapest monthly grocery list that hits your protein and calorie targets.</p>
+    </header>
+
+    <!-- Settings card: the four numbers the optimizer will use -->
+    <section class="card" aria-labelledby="settings-title">
+      <h2 id="settings-title">Settings</h2>
+      <form id="settings-form">
+        <!-- Monthly budget in Swedish kronor -->
+        <label for="budget">Monthly budget (kr)</label>
+        <input id="budget" name="budget" type="number" inputmode="numeric" min="0" step="50" value="4000">
+
+        <!-- Daily calorie target -->
+        <label for="kcal">Daily calories (kcal)</label>
+        <input id="kcal" name="kcal" type="number" inputmode="numeric" min="0" step="50" value="1700">
+
+        <!-- Daily protein minimum -->
+        <label for="protein">Daily protein minimum (g)</label>
+        <input id="protein" name="protein" type="number" inputmode="numeric" min="0" step="5" value="110">
+
+        <!-- How many days the grocery list should cover -->
+        <label for="days">Days in the period</label>
+        <input id="days" name="days" type="number" inputmode="numeric" min="1" max="62" step="1" value="30">
+      </form>
+    </section>
+  </main>
+
+  <!-- Load the app logic last, so the HTML above already exists when it runs -->
+  <script src="app.js"></script>
+</body>
+</html>
