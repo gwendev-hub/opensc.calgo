@@ -50,7 +50,7 @@ Store-by-store prices, scraping or APIs, barcode scanning, accounts or sharing, 
 
 ## 3. Data model – `data/foods.json`
 
-Everything is stored **per 100 g**, so all foods can be compared. Foods sold by the piece (eggs, drinks, bars, cans) also get `pieceGrams`.
+Everything is stored **per 100 g**, so all foods can be compared. Foods sold by the piece (eggs, drinks, bars, cans) also get `pieceGrams`. Foods with several pieces in a pack also get `pieceName` (e.g. `"eggs"`), so the grocery list can say *3 × 12 eggs* (without it: *3 × 12 pcs*).
 
 ```json
 {
@@ -255,7 +255,7 @@ The 1 g minimum stops near fat-free foods (e.g. Greek yoghurt 0% with 0.2 g fat)
 This is the classic **diet problem**, solved with linear programming.
 
 ### Model
-For each food *i* in My foods, the variable is **xᵢ = grams per day**.
+For each food *i* in My foods, the variable is **xᵢ = grams per day** in plan 1. Plans 2 and 3 use **whole packages** instead (see "Whole packages in plans 2 and 3" below); every rule here is the same, written for the grams per day those packages give.
 
 **Minimize** total daily cost: `Σ krPerGramᵢ · xᵢ`
 
@@ -282,22 +282,37 @@ The optimizer makes three plans from the same settings and My foods (`Optimizer.
 | Realistic max limits (`realisticMaxGramsPerDay`) | – | ✔ | ✔ |
 | Food-group limits (`data/groups.json`) | – | ✔ dairy ≤ 700 g, dry grains ≤ 200 g | ✔ |
 | Budget | compared after solving | compared after solving | **ceiling: total cost ≤ monthly budget**, otherwise no plan |
+| Variable | grams per day, rounded up to packs afterwards | **whole packages per month** | **whole packages per month** |
 
-- **0 or ≥ 35 g** can't be written as a plain linear rule, so each food gets a yes/no (binary) variable `useᵢ`: `xᵢ − floorᵢ · useᵢ ≥ 0` and `xᵢ − maxᵢ · useᵢ ≤ 0`, where `floorᵢ` is 35 g or the food's `minGramsIfUsed`, but never more than the food's max (so an own max of 20 g still lets the food in, at exactly 20 g). The solver then does branch and bound, which takes well under a second for the starter list.
+- **0 or ≥ 35 g** can't be written as a plain linear rule, so each food gets a yes/no (binary) variable `useᵢ`: `xᵢ − floorᵢ · useᵢ ≥ 0` and `xᵢ − maxᵢ · useᵢ ≤ 0`, where `floorᵢ` is 35 g or the food's `minGramsIfUsed`, but never more than the food's max (so an own max of 20 g still lets the food in).
 - **At least 10 foods** uses the same yes/no variables: `Σ useᵢ ≥ 10`.
 - **Food-group limits:** `Σ_{i∈group} xᵢ ≤ group max` for each group in `data/groups.json`.
-- **Plan 3 and rounding:** the solver budget is `budget / days` kr per day, but rounding up to whole packs costs a bit more. If the rounded cost goes over budget, plan 3 is solved again with the daily cap lowered by the overshoot (up to 8 tries).
+- **Plan 3 and the budget:** plan 3 is in whole packages, so its cost is exact: if the cheapest high quality plan costs more than the budget, there is no plan 3.
 - The buffer (5 g), plan 3's extra protein (+20 g) and Excellent share (80%), the 35 g floor and the 10 foods are defaults in `Optimizer.DEFAULT_RULES`, to be changeable later under "Advanced".
-- The cost order should be **plan 1 ≤ plan 2 ≤ plan 3 ≤ budget**, because each plan has the same rules as the one before, plus more. That's guaranteed for the solver's cost; rounding up to whole packs could in rare cases swap two plans, so test 13 checks it.
-- The cheapest way to meet "10 foods" is often to add a few foods at exactly 35 g (e.g. 35 g of potatoes). That's expected; watch whether it looks silly in real use.
+- The cost order should be **plan 1 ≤ plan 2 ≤ plan 3 ≤ budget**, because each plan has the same rules as the one before, plus more. Plan 2 ≤ plan 3 is guaranteed: if the search ever finds a cheaper plan 3, plan 2 uses that plan too (it keeps all of plan 2's rules). Plan 1 is rounded up to whole packs after solving, so in rare cases it can cost more than plan 2; test 13 checks the order.
+- The cheapest way to meet "10 foods" is often to add a few foods at the smallest amount allowed (e.g. one pack of potatoes). That's expected; watch whether it looks silly in real use.
 - Every plan returns: its foods with grams per day and packages, total cost, protein and kcal per day, % of protein from Excellent foods, number of foods, and a message if it isn't possible or is over budget.
+
+### Whole packages in plans 2 and 3
+- **The variable** for each food is **nᵢ = whole packages for the period** (an integer, 0, 1, 2, …). Grams per day = `nᵢ × packGrams ÷ days`, e.g. 3 packs of 1 kg rice over 30 days = 100 g a day. Plan 1 stays in grams per day.
+- **All the rules apply to those grams per day:** calories 95–100%, protein, Excellent share, Poor cap, variety, the floor, realistic and own max limits, the food-group limits and at least 10 foods. In the model each food's numbers (kr, kcal, protein, grams for the groups) are simply per package instead of per gram.
+- **Limits become whole packs:** a min rounds up and a max rounds down, e.g. own min 100 g of eggs (24 g a day per 12-pack over 30 days) → at least 5 packs (120 g); max 300 g of kvarg (16.7 g a day per pack) → at most 18 packs. If the user's own min and max fit no whole number of packs, the min wins (like an own min above the default max).
+- **The floor in packs** is the fewest packs that give at least 35 g a day (or `minGramsIfUsed`), but never more packs than the max allows. So a food can be below 35 g only when one more pack would go over its max, e.g. prästost (max 40 g): 1 pack of 700 g over 30 days is 23 g a day, 2 packs would be 47 g. An own max of 20 g of tofu allows 1 pack (13 g a day), which is then its floor.
+- **Foods whose single pack is more than their max per day** can't be used in plans 2 and 3, e.g. rapeseed oil (900 g lasts 45 days at 20 g a day). The "at least 10 foods" message says so when it matters. Short periods make this more common (e.g. 1.5 kg of oats is 214 g a day over 7 days, above its 100 g max).
+- **No rounding afterwards:** the packages are the shopping list, and its cost is exactly the solver's cost.
+- **How it's solved, quickly:** whole numbers make the solver's own branch and bound far too slow for some settings (minutes), so `solvePacks` in `optimizer.js` works in steps:
+  1. **Choose the foods:** solve with `useᵢ` as real yes/no but packs allowed in between (e.g. 2.4 packs). This is quick, and nothing can be cheaper than its cost. No answer → no plan.
+  2. **Whole packs for those foods:** the solver on just those ~10 foods (each used), and also step 1's answer rounded and repaired one or two packs at a time.
+  3. **Cheaper, one or two packs at a time:** keep making the change of one or two foods by one pack (or to/from 0) that saves the most, while every rule still holds.
+  4. **Next choice of foods:** step 1 again with "not exactly these foods" added, up to 3 choices, unless step 1 shows no other choice can save at least 1 kr.
+  The answer is the cheapest plan found: usually the cheapest there is, sometimes a few percent more. The solver's own branch and bound gets a time limit (a safety net only), and its answer is used only if it really is in whole packs. Rows that can never matter are left out of the model to keep it fast: a variety row for a food that can't reach 35% of the calorie minimum even at its max, and in plans 2 and 3 the max row of a food without an own min (its `useᵢ` row already caps it).
+- **Speed:** all three plans together take about 0.3 s (up to about 1 s on the first run) for all ~33 foods on a 2015 laptop; it must stay under about 2 seconds on a phone (test 37).
 
 ### After solving
 1. Monthly grams = `xᵢ × days`.
-2. **Packages to buy** = `ceil(monthlyGrams / packGrams)`. For piece foods, also show the piece count.
+2. **Packages to buy** = `ceil(monthlyGrams / packGrams)` (plans 2 and 3 are already whole packages, so this gives back exactly those). For piece foods, also count the pieces.
 3. Shopping cost = `packages × packPrice`. Compare it with the budget.
-4. Show the daily kcal and protein actually reached, and the leftover amount from rounding up (e.g. "about 200 g of rice left over").
-5. **Large leftovers:** each item gets `largeLeftover: true` when more than half a pack is left at the end of the period (`leftoverGrams > packGrams / 2`). The grocery list marks those foods and lists them in a warning.
+4. Show the daily kcal and protein actually reached.
 
 ### When there's no solution (infeasible)
 Never just say "no solution". Tell the user **why and what to change**. Every message ends with something to do (add, raise, lower, use another plan):
@@ -310,8 +325,8 @@ Never just say "no solution". Tell the user **why and what to change**. Every me
 3. **Plans 2 and 3** first check the food count: *"This plan needs at least 10 different foods, but only N are in My foods. Add 1 more, e.g. …"* (foods with an own max of 0 don't count, and the message says so). Then, if the plan fails even without the floor, 10 foods and group limits, they run the checks in point 1 with their own targets (115 g or 130 g protein, 60% or 80% Excellent, realistic max limits). Otherwise it's the realistic rules together: *"The realistic rules … can't all be met with these foods at X g protein. Add a few more foods."*
 4. **Plan 3** has no plan if plan 2 has none (same reasons), if the budget is below plan 2's cost (*"Your budget of X kr is less than the cheapest realistic plan (Y kr), so no realistic plan fits. Raise the budget to at least Y kr, or use the Absolute cheapest plan."*), or if the high quality plan costs more than the budget: *"The high quality plan costs X kr, which is W kr over your budget of B kr. Raise the budget to at least X kr, or use the Cheapest realistic plan, which fits."*
 
-### v0.1 improvement (only if rounding causes problems)
-Switch the variables to **whole packages per month**, using integer variables in the same solver. Then the budget is exact and nothing needs rounding. Do this only after v0 works.
+### Whole packages in plan 1 too? (only if feedback asks for it)
+Plan 1 is still solved in grams per day and rounded up afterwards, as the "absolute cheapest" reference. It could use whole packages like plans 2 and 3 later.
 
 ---
 
@@ -338,9 +353,8 @@ Still one `index.html`, split into **four tabs**. Switching tabs only shows one 
    - **Grocery list of the selected plan** (below the cards, only after the first run; no macros, they have their own tab):
      - Top line: **Total 3,420 kr of 4,000 kr ✔** · **112 g protein/day** · **1,690 kcal/day**
      - Messages, e.g. over budget, or why the plan isn't possible
-     - Grocery table: food, rating badge, amount per day, packages, cost, and a total
+     - **Grocery table** with four columns: **Food** (with its rating badge), **Per day** (grams), **Packs** and **Cost**, plus a total row. Packs says how many of which pack, e.g. *2 × 1 kg*, *7 × 250 g* or *3 × 12 eggs* (`packSize(food)` in `app.js`: pieces with `pieceName` for foods with several pieces per pack, otherwise kg from 1,000 g up, otherwise g). Nothing about leftovers.
      - **Protein quality** section (section 4.4)
-     - **Large leftovers:** foods with more than half a pack left at the end of the period get *⚠ 620 g left* under their pack count, and a yellow box lists them (*"Rice, dry: about 620 g of a 1,000 g pack"*).
      - **Copy list** button (full width) under the table: copies the selected plan as plain text to paste into Notes or a message, then says **Copied ✓** for 2 seconds. Uses `navigator.clipboard` (https or localhost); otherwise the old copy command; if both fail, the text is shown in a box to select by hand. The text (`copyListText(plan, days)` in `app.js`):
        ```
        Cheapest realistic – 30 days
@@ -377,8 +391,10 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
    *Done when:* a real plan is shown with cost, kcal, protein and the Excellent/OK/Poor breakdown.
 5. **Infeasible and over-budget messages,** as described in section 5.
    *Done when:* each failure case shows a helpful message instead of an empty result, saying why and what to change (test 35).
-6. **Min/max per food, Copy list and large-leftover warning** (section 6, Foods and Plans tabs).
-   *Done when:* own limits are saved and respected by all three plans, Copy list pastes a readable list, and large leftovers are flagged (tests 31–34).
+6. **Min/max per food, Copy list and the simpler grocery list** (section 6, Foods and Plans tabs).
+   *Done when:* own limits are saved and respected by all three plans, Copy list pastes a readable list, and the grocery list shows Food, Per day, Packs (*2 × 1 kg*) and Cost (tests 31–34).
+6b. **Whole packages in plans 2 and 3** (section 5).
+   *Done when:* plans 2 and 3 are whole packages with every rule kept, and making the plans stays under about 2 seconds on a phone (tests 36–37).
 7. **Polish for the phone:** tap targets of at least 44 px, readable on a small screen, and a dark mode that follows the phone setting.
 8. **Feedback:** add a link to a short Google Form, then share the page link with friends.
 
@@ -394,17 +410,17 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 4 | Tuna max = 0 | Tuna not in the result |
 | 5 | Eggs min = 100 g/day | Eggs ≥ 100 g/day in the result |
 | 6 | Check the variety cap | No single food gives more than 35% of kcal |
-| 7 | Check rounding | Packages × pack size ≥ monthly grams for every food |
+| 7 | Check rounding | Packages × pack size ≥ monthly grams for every food (plans 2 and 3: exactly equal) |
 | 8 | Ratings | keso, kvarg, tuna, tofu = Excellent; eggs, lentils, salmon = OK; peanut butter, oats, rice = Poor |
 | 9 | Peanut butter, oats, lentils, rice + keso and tuna ticked | ≥ 60% of protein from Excellent foods; Poor foods ≤ 40% of kcal |
 | 10 | Only peanut butter, oats, lentils and rice ticked | Infeasible, with the "add more Excellent protein foods" message |
 | 11 | Lifts/dilutes and target density | Lifts/dilutes uses the fixed 10 g per 100 kcal: keso and tuna "lift"; eggs, lentils, chickpeas and oats "dilute". Target density 110 g / 1,700 kcal → 6.5 g per 100 kcal (info only); changing protein to 150 changes only the info line, no food's label |
 | 12 | Three plans, default settings | All three give valid plans: kcal 1,615–1,700; protein ≥ 110 / 115 / 130; ≥ 60% / 60% / 80% of protein from Excellent; Poor ≤ 40% of kcal |
 | 13 | Cost order, default settings | Plan 1 ≤ plan 2 ≤ plan 3 ≤ budget |
-| 14 | Floor per food | No food in plans 2 and 3 is between 0 and 35 g a day (fats with `minGramsIfUsed`: between 0 and 10 g) |
+| 14 | Floor per food | No food in plans 2 and 3 is between 0 and 35 g a day (fats with `minGramsIfUsed`: between 0 and 10 g), unless one more whole pack would go over its max (prästost: 1 pack = 23 g) |
 | 15 | Realistic max | Plans 2 and 3 respect every `realisticMaxGramsPerDay` (tofu 150, canned tuna 120, Oumph 150, kvarg 300); plan 1 keeps `maxGramsPerDay` |
 | 16 | Protein targets | Plan 2 protein ≥ 115 g; plan 3 protein ≥ 130 g and ≥ 80% from Excellent foods |
-| 17 | Budget 1,300 kr (below the cheapest realistic plan) | Plan 2 shown with an over-budget message; plan 3 says no realistic plan fits the budget |
+| 17 | Budget 1,250 kr (below the cheapest realistic plan, about 1,270 kr) | Plan 2 shown with an over-budget message; plan 3 says no realistic plan fits the budget |
 | 18 | Food count | Plans 2 and 3 each have at least 10 different foods |
 | 19 | Food-group limits | In plans 2 and 3: dairy ≤ 700 g/day; rice + pasta + bulgur + oats ≤ 200 g dry/day; every group in `groups.json` has members |
 | 20 | Budget 1,500 kr (between plan 2 and plan 3) | Plans 1 and 2 fit; plan 3 has no plan and says what it would cost and how far over budget |
@@ -418,11 +434,13 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 28 | Adding and removing (real `index.html`) | Unticking keso removes it from My foods, the saved list and what the optimizer gets; searching "cottage" and tapping keso adds it back under its category, saves it and shows ✓; tapping it again changes nothing; the row (untick control) ≥ 44 px |
 | 29 | The optimizer uses only My foods (real `index.html`) | With 12 foods in My foods, the button makes the same three plans (foods and totals) as `Optimizer.planAll` with only those 12, and no grocery list has any other food |
 | 30 | Starter set and moving old ticks over (reloads `index.html`) | 12–18 foods have `"starter": true` and give three valid plans; first visit (nothing saved) shows and saves exactly the starter set; old `pbp.ticks` with keso and oil unticked becomes every other food, and `pbp.ticks` is removed; a saved empty list stays empty |
-| 31 | Own min/max in all three plans | Limits eggs min 100, keso 60–120, tofu max 20, kvarg min 320, rice max 0: every plan finds a plan with each food inside its limits; kvarg's realistic max is raised to 320; tofu's floor in plans 2 and 3 is lowered to 20 g |
+| 31 | Own min/max in all three plans | Limits eggs min 100, keso 60–120, tofu max 20, kvarg min 320, rice max 0: every plan finds a plan with each food inside its limits; kvarg's realistic max is raised to 320 g (whole packages: exactly 20 packs); tofu's floor is lowered to 20 g (whole packages: at most 1 pack, and 1 pack is its floor) |
 | 32 | Min/max editor (real `index.html`) | Tapping keso opens its editor (empty max shows 300 as a hint); min 150 / max 100 shows an error and saves nothing; 60 / 120 is saved under `pbp.limits`, closes the editor and shows the marker on keso only; the plans keep keso between 60 and 120 g; reopening shows 60 / 120; Reset removes the limits and the marker and marks plans out of date; food button and untick area ≥ 44 px |
 | 33 | Copy list | `copyListText` on a hand-made plan gives exactly the text from section 6 (categories in order, pieces for eggs, no double pack size for Barebells, "1 pack"); on the page the button copies the selected plan (clipboard replaced by a stand-in) and says "Copied ✓" |
-| 34 | Large leftover warning | With 7 days, every item's `largeLeftover` is true exactly when more than half a pack is left (and some are); on the page each plan's warning box and table markers list exactly those foods |
-| 35 | Failed plans say why and what to change | For rice + apples, Poor/OK foods only, budgets 500 / 1,300 / 1,500, 9 foods, oil min 200 g and own max 0 on keso and tuna: every message has something to do; "too few Excellent" names Excellent foods from `foods.json` that aren't in My foods; the minimums message names the oil; own max limits are pointed out |
+| 34 | Simpler grocery list (real `index.html`) | Every plan's table has the columns Food, Per day, Packs, Cost; each Packs cell is "packages × pack size" matching the optimizer (`packSize`: eggs "12 eggs", rice "1 kg", oats "1.5 kg", keso "250 g"); no leftover notes or warnings anywhere |
+| 35 | Failed plans say why and what to change | For rice + apples, Poor/OK foods only, budgets 500 / 1,250 / 1,500, 9 foods, oil min 200 g and own max 0 on keso and tuna: every message has something to do; "too few Excellent" names Excellent foods from `foods.json` that aren't in My foods; the minimums message names the oil; own max limits are pointed out |
+| 36 | Whole packages in plans 2 and 3 | With default settings, the own limits of test 31, 7 days, and 14 days at 2,400 kcal / 160 g: every food in plans 2 and 3 is a whole number of packages (grams per day × days = packages × pack size) and every rule holds (kcal, protein, Excellent, Poor, variety, floor, max, groups, 10 foods); plan 1 is still in grams per day |
+| 37 | Speed | `planAll` with every food in My foods takes under 2 seconds (default settings, 14 days at 2,400 kcal / 160 g, 7 days); open `test.html` on the phone to check the phone itself |
 
 "Tuna" in tests 4, 8 and 9 means both tuna products (canned and frozen). Test 4 also uses a food set where tuna is normally picked, and test 6 adds a stress case (quality rules off, every max × 10) so the variety cap actually has to do something. `test.html` also shows the three default plans side by side. The page tests start with every food in My foods and no own min/max, and the user's own saved data (`pbp.*` in `localStorage`) is put back after the run.
 

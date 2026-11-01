@@ -159,17 +159,27 @@
       realistic: () => scenarios.three().realistic,
       highQuality: () => scenarios.three().highQuality,
       // Budget below the cheapest realistic plan, so plan 3 can't exist
-      threeLowBudget: () => planFor("threeLowBudget", { ...DEFAULTS, budget: 1300 }, foods, true),
+      threeLowBudget: () => planFor("threeLowBudget", { ...DEFAULTS, budget: LOW_BUDGET }, foods, true),
       // Budget between plan 2 and plan 3, so only the high quality plan is over budget
       threeMidBudget: () => planFor("threeMidBudget", { ...DEFAULTS, budget: 1500 }, foods, true),
       // Only 9 foods ticked: too few for plans 2 and 3
       nineFoods: () => planFor("nineFoods", DEFAULTS, pick(NINE_FOODS), true),
       // Own min/max per food (test 31), all three plans
       ownLimits: () => planFor("ownLimits", { ...DEFAULTS, limits: OWN_LIMITS }, foods, true),
+      // Whole packages (test 36): a short period, and a short period with high targets
+      packsWeek: () => planFor("packsWeek", PACKS_WEEK, foods, true),
+      packsHigh: () => planFor("packsHigh", PACKS_HIGH, foods, true),
     };
+
+    // Settings for test 36: 7 days (big packs are coarse steps), and 14 days with high targets
+    const PACKS_WEEK = { ...DEFAULTS, days: 7 };
+    const PACKS_HIGH = { budget: 4000, kcal: 2400, protein: 160, days: 14 };
 
     // The three plans in display order
     const THREE = ["cheapest", "realistic", "highQuality"];
+
+    // Test 17's budget: below the cheapest realistic plan (about 1,270 kr in whole packages)
+    const LOW_BUDGET = 1250;
 
     // 9 foods that easily meet the targets in plan 1, but are one short of plans 2 and 3's 10
     const NINE_FOODS = ["tuna_can", "cod_frozen", "eggs", "keso", "kvarg", "greek_0", "tofu", "lentils_red", "rice"];
@@ -369,7 +379,7 @@
           const notes = plan.status === "optimal"
             ? plan.items.map((i) =>
                 `${i.name}: ${fmt(i.gramsPerDay)} g/day × ${DEFAULTS.days} = ${fmt(i.monthlyGrams)} g → ` +
-                `${i.packages} pack(s), ${fmt(i.leftoverGrams)} g left over`)
+                `${i.packages} pack(s)`)
             : [];
           return { plan, checks, notes };
         },
@@ -523,7 +533,9 @@
       },
       {
         title: "Floor per food in plans 2 and 3",
-        expected: "Every food in plans 2 and 3 is 0 or at least 35 g a day (fats: at least 10 g)",
+        expected:
+          "Every food in plans 2 and 3 is 0 or at least 35 g a day (fats: at least 10 g), unless one more whole pack " +
+          "would go over its max",
         run() {
           const checks = [];
           for (const key of ["realistic", "highQuality"]) {
@@ -537,7 +549,11 @@
               const own = foodOf(i).minGramsIfUsed;
               return typeof own === "number" ? own : RULES.minGramsIfUsed;
             };
-            const small = p.items.filter((i) => i.gramsPerDay < floorOf(i) - EPS);
+            // In whole packages a food may be below its floor only when one more pack would go over its max
+            // (e.g. prästost, max 40 g: 1 pack for 30 days is 23 g, 2 packs would be 47 g)
+            const maxOf = (i) => foodOf(i).realisticMaxGramsPerDay || foodOf(i).maxGramsPerDay;
+            const small = p.items.filter((i) =>
+              i.gramsPerDay < floorOf(i) - EPS && i.gramsPerDay + foodOf(i).packGrams / DEFAULTS.days <= maxOf(i) + EPS);
             const amounts = p.items.map((i) => `${i.id} ${fmt(i.gramsPerDay)}/${floorOf(i)}`).join(", ");
             checks.push([
               `${p.title}: all foods at or above their floor` +
@@ -599,7 +615,7 @@
         },
       },
       {
-        title: "Budget 1,300 kr: below the cheapest realistic plan",
+        title: "Budget 1,250 kr: below the cheapest realistic plan",
         expected: "Plan 2 is shown with an over-budget message; plan 3 explains that no realistic plan fits",
         run() {
           const plans = scenarios.threeLowBudget();
@@ -608,6 +624,8 @@
           return {
             plan: p3,
             checks: [
+              [`Cheapest realistic costs ${p2.totals ? fmt(p2.totals.shoppingCost) : "?"} kr, more than ${LOW_BUDGET} kr`,
+                p2.status === "optimal" && p2.totals.shoppingCost > LOW_BUDGET],
               ["Cheapest realistic: plan still shown", p2.status === "optimal"],
               ["Cheapest realistic: over-budget message", p2.messages.some((m) => m.includes("over budget"))],
               ["High quality: no plan", p3.status === "infeasible"],
@@ -1073,6 +1091,18 @@
             `tofu max 20 g: its floor in plans 2 and 3 is lowered to 20 g (got ${-tofuModel.variables.use_tofu.floor_tofu} g)`,
             tofuModel.variables.use_tofu.floor_tofu === -20,
           ]);
+          // The same two cases in whole packages (plans 2 and 3): kvarg 500 g packs over 30 days are 16.7 g a day each,
+          // so min 320 g needs 20 packs; tofu 400 g packs are 13.3 g a day, so max 20 g allows 1 pack, and 1 pack is its floor
+          const kvargPacks = Optimizer.buildModel({ ...DEFAULTS, limits: OWN_LIMITS }, [kvarg], { realistic: true, packs: true });
+          checks.push([
+            `whole packages: kvarg min 320 g → ${JSON.stringify(kvargPacks.constraints.limit_kvarg)} packs (20 × 500 g = 333 g a day)`,
+            kvargPacks.constraints.limit_kvarg.min === 20 && kvargPacks.constraints.limit_kvarg.max === 20,
+          ]);
+          const tofuPacks = Optimizer.buildModel({ ...DEFAULTS, limits: OWN_LIMITS }, [tofu], { realistic: true, packs: true });
+          checks.push([
+            `whole packages: tofu max 20 g → at most ${-tofuPacks.variables.use_tofu.ceiling_tofu} pack, floor ${-tofuPacks.variables.use_tofu.floor_tofu} pack (13 g a day)`,
+            tofuPacks.variables.use_tofu.ceiling_tofu === -1 && tofuPacks.variables.use_tofu.floor_tofu === -1,
+          ]);
           return { plan: plans.realistic, checks };
         },
       },
@@ -1167,35 +1197,34 @@
         },
       },
       {
-        title: "Large leftover warning",
+        title: "Simpler grocery list (real index.html)",
         expected:
-          "Every item is flagged exactly when more than half a pack is left over; on the page the flagged foods " +
-          "(and only those) are listed in the warning and marked in the grocery table",
+          "The grocery table has the columns Food, Per day, Packs and Cost; Packs reads like \"2 × 1 kg\" or \"3 × 12 eggs\" " +
+          "and matches the optimizer's packages; no plan's list says anything about leftovers",
         async run(app) {
-          const settings = { ...DEFAULTS, days: 7 };
-          const expected = Optimizer.planAll(settings, foods, groups);
-          const checks = [];
-          let flagged = 0;
+          const page = await pageGroceryList(app);
+          const expected = Optimizer.planAll(DEFAULTS, foods, groups);
+          const byId = (id) => foods.find((f) => f.id === id);
+          const checks = [
+            [`app.packSize: eggs "${app.packSize(byId("eggs"))}", rice "${app.packSize(byId("rice"))}", ` +
+              `oats "${app.packSize(byId("oats"))}", keso "${app.packSize(byId("keso"))}"`,
+              app.packSize(byId("eggs")) === "12 eggs" && app.packSize(byId("rice")) === "1 kg" &&
+              app.packSize(byId("oats")) === "1.5 kg" && app.packSize(byId("keso")) === "250 g"],
+          ];
           for (const key of THREE) {
             const p = expected[key];
-            if (p.status !== "optimal") continue;
-            const wrong = p.items.filter((i) => i.largeLeftover !== (i.leftoverGrams > foodOf(i).packGrams / 2));
-            flagged += p.items.filter((i) => i.largeLeftover).length;
-            checks.push([`${p.title}: flag matches "more than half a pack left"` + (wrong.length ? ` (wrong: ${wrong.map((i) => i.id)})` : ""),
-              wrong.length === 0]);
-          }
-          checks.push([`with 7 days, ${flagged} foods are flagged (so the test checks something)`, flagged > 0]);
-
-          const page = await pageLeftovers(app, settings);
-          for (const key of THREE) {
-            const p = expected[key];
-            const want = p.status === "optimal" ? p.items.filter((i) => i.largeLeftover).map((i) => i.id) : [];
             const shown = page[key];
-            checks.push(
-              [`${p.title}: warning lists ${shown.warning.join(", ") || "nothing"} (expected ${want.join(", ") || "nothing"})`,
-                shown.warning.join() === want.join()],
-              [`${p.title}: the same foods are marked in the table`, shown.marked.join() === want.join()],
-            );
+            checks.push([`${p.title}: columns ${shown.columns.join(", ")}`, shown.columns.join() === "Food,Per day,Packs,Cost"]);
+            // Each row's Packs cell is "packages × one pack's size"
+            const wrong = p.status === "optimal"
+              ? p.items.filter((i) => shown.packs[i.id] !== `${i.packages} × ${app.packSize(byId(i.id))}`)
+              : [];
+            checks.push([
+              `${p.title}: Packs cells, e.g. ${Object.values(shown.packs).slice(0, 3).join(", ")}` +
+                (wrong.length ? ` (wrong: ${wrong.map((i) => `${i.id} "${shown.packs[i.id]}"`).join(", ")})` : ""),
+              p.status === "optimal" && Object.keys(shown.packs).length === p.items.length && wrong.length === 0,
+            ]);
+            checks.push([`${p.title}: no leftover notes or warnings`, !shown.mentionsLeftovers]);
           }
           return { checks };
         },
@@ -1213,7 +1242,7 @@
             "only Poor/OK foods": [Optimizer.plan(DEFAULTS, pick(POOR_FOUR), foods)],
             "budget 500": [Optimizer.plan({ ...DEFAULTS, budget: 500 }, foods, foods)],
             "only 9 foods": Object.values(Optimizer.planAll(DEFAULTS, pick(NINE_FOODS), groups, foods)),
-            "budget 1,300": Object.values(Optimizer.planAll({ ...DEFAULTS, budget: 1300 }, foods, groups, foods)),
+            "budget 1,250": Object.values(Optimizer.planAll({ ...DEFAULTS, budget: LOW_BUDGET }, foods, groups, foods)),
             "budget 1,500": Object.values(Optimizer.planAll({ ...DEFAULTS, budget: 1500 }, foods, groups, foods)),
             "oil min 200 g": [Optimizer.plan({ ...DEFAULTS, limits: { oil: { min: 200 } } }, foods, foods)],
             "own max 0 on keso and tuna": [Optimizer.plan({ ...DEFAULTS, limits: { keso: { max: 0 }, ...NO_TUNA } }, pick(TEST9_FOODS), foods)],
@@ -1244,7 +1273,96 @@
           return { checks, notes };
         },
       },
+      {
+        title: "Whole packages in plans 2 and 3",
+        expected:
+          "In plans 2 and 3 every food is a whole number of packages for the period (grams per day = packages × pack size ÷ days) " +
+          "and every rule holds for those amounts; plan 1 stays in grams per day. Checked with default settings, own limits, " +
+          "7 days, and 14 days at 2,400 kcal / 160 g",
+        run() {
+          const cases = {
+            "default": [DEFAULTS, scenarios.three()],
+            "own limits": [{ ...DEFAULTS, limits: OWN_LIMITS }, scenarios.ownLimits()],
+            "7 days": [PACKS_WEEK, scenarios.packsWeek()],
+            "14 days, 2,400 kcal": [PACKS_HIGH, scenarios.packsHigh()],
+          };
+          const checks = [];
+          for (const [name, [settings, plans]] of Object.entries(cases)) {
+            for (const key of ["realistic", "highQuality"]) {
+              const p = plans[key];
+              if (p.status !== "optimal") {
+                checks.push([`${name}, ${p.title}: no plan (${p.messages.join(" ")})`, false]);
+                continue;
+              }
+              // Whole packages: grams per day × days is exactly packages × pack size
+              const notWhole = p.items.filter((i) => Math.abs(i.gramsPerDay * settings.days - i.packages * foodOf(i).packGrams) > 1e-6);
+              checks.push([
+                `${name}, ${p.title}: ${p.items.map((i) => `${i.id} ${i.packages}`).join(", ")}` +
+                  (notWhole.length ? ` (not whole: ${notWhole.map((i) => i.id).join(", ")})` : ""),
+                notWhole.length === 0,
+              ]);
+              const broken = rulesBroken(p, key, settings);
+              checks.push([`${name}, ${p.title}: every rule holds` + (broken.length ? ` (broken: ${broken.join("; ")})` : ""),
+                broken.length === 0]);
+            }
+          }
+          // Plan 1 is unchanged: grams per day, rounded up to packs afterwards
+          const p1 = scenarios.three().cheapest;
+          const inBetween = p1.status === "optimal"
+            ? p1.items.filter((i) => Math.abs(i.gramsPerDay * DEFAULTS.days - i.packages * foodOf(i).packGrams) > 1e-6)
+            : [];
+          checks.push([`Absolute cheapest is still in grams per day (${inBetween.length} foods aren't whole packs)`, inBetween.length > 0]);
+          return { checks };
+        },
+      },
+      {
+        title: "Speed",
+        expected: "Making all three plans takes under 2 seconds on this device, with default settings and with high targets",
+        run() {
+          const checks = [];
+          for (const [name, settings] of [["default settings", DEFAULTS], ["14 days, 2,400 kcal / 160 g", PACKS_HIGH], ["7 days", PACKS_WEEK]]) {
+            const started = performance.now();
+            Optimizer.planAll(settings, foods, groups, foods);
+            const ms = performance.now() - started;
+            checks.push([`${name}, every food in My foods: ${fmt(ms)} ms`, ms < 2000]);
+          }
+          return { checks, notes: ["Open test.html on the phone to check the phone's own speed."] };
+        },
+      },
     ];
+
+    // Every rule of plan 2 or 3 that a plan breaks, as short texts ([] if none).
+    // settings are the settings the plan was made with; key says which plan's targets to use.
+    function rulesBroken(plan, key, settings) {
+      const broken = [];
+      const t = plan.totals;
+      const proteinMin = settings.protein + (key === "highQuality" ? RULES.highQualityProteinExtra : RULES.proteinBuffer);
+      const excellentMin = key === "highQuality" ? RULES.highQualityExcellentShare : RULES.excellentProteinShare;
+      if (t.kcalPerDay < settings.kcal * RULES.kcalLowFactor - EPS || t.kcalPerDay > settings.kcal + EPS) broken.push(`kcal ${fmt(t.kcalPerDay)}`);
+      if (t.proteinPerDay < proteinMin - EPS) broken.push(`protein ${fmt(t.proteinPerDay, 1)} g`);
+      if (plan.quality.proteinShare.excellent < excellentMin - EPS) broken.push(`Excellent ${pct(plan.quality.proteinShare.excellent)}`);
+      if (plan.quality.kcalShare.poor > RULES.poorKcalShare + EPS) broken.push(`Poor ${pct(plan.quality.kcalShare.poor)}`);
+      if (biggestKcalShare(plan) > RULES.varietyKcalShare + EPS) broken.push(`variety ${pct(biggestKcalShare(plan))}`);
+      if (t.foodCount < RULES.minFoods) broken.push(`${t.foodCount} foods`);
+      for (const g of groups) {
+        if (groupGrams(plan, g.id) > g.maxGramsPerDay + EPS) broken.push(`${g.id} ${fmt(groupGrams(plan, g.id))} g`);
+      }
+      for (const i of plan.items) {
+        const f = foodOf(i);
+        const own = (settings.limits && settings.limits[f.id]) || {};
+        // The max: own max, otherwise the realistic max, raised to an own min above it
+        const dataMax = typeof f.realisticMaxGramsPerDay === "number" ? f.realisticMaxGramsPerDay : f.maxGramsPerDay;
+        const max = typeof own.max === "number" ? own.max : Math.max(dataMax, own.min || 0);
+        // The floor: 35 g (or the food's own), but never above the max
+        const floor = Math.min(max, typeof f.minGramsIfUsed === "number" ? f.minGramsIfUsed : RULES.minGramsIfUsed);
+        // A whole pack can be a bit below the floor only when the max allows no more (e.g. tofu max 20 g: 1 pack = 13 g)
+        const onePackMore = i.gramsPerDay + f.packGrams / settings.days;
+        if (i.gramsPerDay > max + EPS && i.gramsPerDay > (own.min || 0) + f.packGrams / settings.days) broken.push(`${f.id} above max`);
+        if (i.gramsPerDay < floor - EPS && onePackMore <= max + EPS) broken.push(`${f.id} below floor`);
+        if (i.gramsPerDay < (own.min || 0) - EPS) broken.push(`${f.id} below own min`);
+      }
+      return broken;
+    }
 
     // Own limits for test 31: a min, a min and max, a max below the 35 g floor,
     // a min above the realistic max (kvarg 300 g), and max 0
@@ -1522,26 +1640,25 @@
       }
     }
 
-    // Test 34 on the real page: make the plans for a short period and read the leftover warnings of each plan
-    async function pageLeftovers(app, settings) {
+    // Test 34 on the real page: make the plans and read each plan's grocery table
+    async function pageGroceryList(app) {
       const doc = app.document;
-      try {
-        await pageMakePlans(app, settings);
-        const shown = {};
-        for (const key of THREE) {
-          app.selectPlan(key);
-          shown[key] = {
-            warning: [...doc.querySelectorAll("#plan-detail .leftover-warning li[data-id]")].map((li) => li.dataset.id),
-            marked: [...doc.querySelectorAll("#plan-detail tr.large-leftover")].map((tr) => tr.dataset.id),
-          };
+      await pageMakePlans(app, DEFAULTS);
+      const shown = {};
+      for (const key of THREE) {
+        app.selectPlan(key);
+        const detail = doc.getElementById("plan-detail");
+        const packs = {};
+        for (const row of detail.querySelectorAll(".grocery tbody tr[data-id]")) {
+          packs[row.dataset.id] = row.querySelectorAll("td")[2].textContent.trim();
         }
-        return shown;
-      } finally {
-        // Back to the default 30 days
-        const days = doc.getElementById("days");
-        days.value = DEFAULTS.days;
-        fireIn(app, days, "input");
+        shown[key] = {
+          columns: [...detail.querySelectorAll(".grocery thead th")].map((th) => th.textContent.trim()),
+          packs,
+          mentionsLeftovers: /left ?over|g left/i.test(detail.textContent),
+        };
       }
+      return shown;
     }
 
     // Test 30: reload the page with different saved data, as if it were a first visit or an old user.

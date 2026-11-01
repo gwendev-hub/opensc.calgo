@@ -869,20 +869,29 @@ function renderMacros() {
   document.getElementById("macro-section").innerHTML = macroHtml(plans[selectedPlan]);
 }
 
-// Build the grocery table for one plan: food, badge, grams per day, packages, cost
+// One pack's size: "12 eggs" for foods with several pieces per pack (pieceName from
+// foods.json, otherwise "pcs"), else its weight: "1 kg", "1.5 kg" or "250 g"
+function packSize(f) {
+  if (f.pieceGrams && f.pieceGrams < f.packGrams) {
+    return `${Math.round(f.packGrams / f.pieceGrams)} ${f.pieceName || "pcs"}`;
+  }
+  if (f.packGrams >= 1000) return `${(f.packGrams / 1000).toLocaleString("en-GB")} kg`;
+  return `${num(f.packGrams)} g`;
+}
+
+// Packages to buy, e.g. "2 × 1 kg" or "3 × 12 eggs"
+const packsText = (item, f) => `${item.packages} × ${packSize(f)}`;
+
+// Build the grocery table for one plan: food (with its badge), grams per day, packs, cost
 function groceryTableHtml(plan) {
   const rows = plan.items
     .map((i) => {
       const f = foods.find((x) => x.id === i.id);
-      // Foods with several pieces per pack (e.g. eggs) also show how many pieces
-      const pieces = f.pieceGrams && f.pieceGrams < f.packGrams ? `<br><span class="muted">${i.piecesToBuy} pcs</span>` : "";
-      // More than half a pack left over at the end: a small marker (explained under the table)
-      const leftover = i.largeLeftover ? `<br><span class="leftover-mark">⚠ ${num(i.leftoverGrams)} g left</span>` : "";
       return `
-        <tr${i.largeLeftover ? ' class="large-leftover"' : ""} data-id="${i.id}">
+        <tr data-id="${i.id}">
           <td>${esc(i.name)}<span class="badge ${i.rating}">${RATING_LABELS[i.rating]}</span></td>
           <td class="num">${num(i.gramsPerDay)} g</td>
-          <td class="num">${i.packages}${pieces}${leftover}</td>
+          <td class="num packs">${packsText(i, f)}</td>
           <td class="num">${num(i.cost)} kr</td>
         </tr>`;
     })
@@ -897,21 +906,6 @@ function groceryTableHtml(plan) {
         <tr><th scope="row" colspan="3">Total for ${num(planSettings.days)} days</th><td class="num">${num(plan.totals.shoppingCost)} kr</td></tr>
       </tfoot>
     </table>`;
-}
-
-// Warning for foods where more than half a pack is left over at the end of the period ("" if none)
-function leftoverWarningHtml(plan) {
-  const big = plan.items.filter((i) => i.largeLeftover);
-  if (big.length === 0) return "";
-  const rows = big
-    .map((i) => `<li data-id="${i.id}">${esc(i.name)}: about ${num(i.leftoverGrams)} g of a ${num(i.packGrams)} g pack</li>`)
-    .join("");
-  return `
-    <div class="warning leftover-warning">
-      <strong>Large leftovers</strong> – more than half a pack left after ${num(planSettings.days)} days:
-      <ul>${rows}</ul>
-      Fine if it keeps; otherwise look for a smaller pack.
-    </div>`;
 }
 
 // The selected plan as plain text for Notes or a message, grouped by category, e.g.
@@ -1026,7 +1020,6 @@ function renderPlanDetail() {
     ${groceryTableHtml(plan)}
     <button type="button" class="secondary copy-list" data-copy-list>Copy list</button>
     <textarea id="copy-fallback" class="copy-fallback" readonly rows="8" hidden></textarea>
-    ${leftoverWarningHtml(plan)}
     ${proteinQualityHtml(plan)}`;
 }
 

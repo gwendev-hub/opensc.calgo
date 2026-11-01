@@ -24,7 +24,7 @@ const Optimizer = (() => {
   };
 
   // Amounts below this many grams per day are treated as zero.
-  // The solver can return tiny leftovers like 0.0000001 g, and we don't want
+  // The solver can return tiny amounts like 0.0000001 g, and we don't want
   // to tell anyone to buy a whole pack of something because of that.
   const MIN_GRAMS_PER_DAY = 0.5;
 
@@ -65,6 +65,9 @@ const Optimizer = (() => {
   // collide with those names.
   const varName = (f) => "food_" + f.id;
 
+  // Same name for the yes/no variable that says whether a food is used (realistic plans)
+  const useName = (f) => "use_" + f.id;
+
   // Merge the user's rules over the defaults
   function rulesFrom(settings) {
     return { ...DEFAULT_RULES, ...(settings.rules || {}) };
@@ -83,6 +86,33 @@ const Optimizer = (() => {
     const min = typeof override.min === "number" ? override.min : 0;
     const max = typeof override.max === "number" ? override.max : Math.max(dataMax, min);
     return { min, max };
+  }
+
+  // Limits in the unit of the food's variable (PLAN.md section 5):
+  //   grams per day (plan 1), or
+  //   whole packages per month (plans 2 and 3, packs = true).
+  // Returns { unit, min, max, floor }:
+  //   unit  – grams per day that one unit of the variable stands for
+  //           (1, or packGrams ÷ days, e.g. a 1 kg pack over 30 days = 33.3 g a day)
+  //   min / max – the per-food limits in that unit
+  //   floor – the smallest amount if the food is used (realistic plans only), in that unit
+  function unitLimits(f, settings, realistic = false, packs = false) {
+    const rules = rulesFrom(settings);
+    const { min, max } = limitsFor(f, settings, realistic);
+    const floorGrams = typeof f.minGramsIfUsed === "number" ? f.minGramsIfUsed : rules.minGramsIfUsed;
+    if (!packs) {
+      // Grams: the floor is never above the max, so a user max of e.g. 20 g still lets the food in
+      return { unit: 1, min, max, floor: Math.min(max, floorGrams) };
+    }
+    const unit = f.packGrams / settings.days;
+    // Min rounds up to whole packs and max rounds down (the small 1e-9 stops
+    // 99.99999 / 33.33333 becoming 2 instead of 3). If the user's own min and max
+    // fit no whole number of packs, their min wins, like an own min above the default max.
+    const minPacks = Math.ceil(min / unit - 1e-9);
+    const maxPacks = Math.max(minPacks, Math.floor(max / unit + 1e-9));
+    // At least 1 pack if used, and enough packs for the floor, but never more than the max
+    const floorPacks = Math.min(maxPacks, Math.max(1, Math.ceil(floorGrams / unit - 1e-9)));
+    return { unit, min: minPacks, max: maxPacks, floor: floorPacks };
   }
 
   // The user's own limits ({ id: { min?, max? } }) on foods in this list, as names,
@@ -135,15 +165,17 @@ const Optimizer = (() => {
   //                         "excellent", "poor", "variety")
   //   realistic           – plans 2 and 3: 35 g floor per food, realistic max
   //                         limits, at least 10 foods and the group limits
+  //   packs               – plans 2 and 3: each food's variable is the number of whole
+  //                         packages per month (an integer) instead of grams per day
   //   groups              – food-group limits from data/groups.json (realistic only)
   //   proteinMin          – protein minimum to use instead of settings.protein
-  //   costMax             – most kr per day the plan may cost (plan 3)
   // Rule shares (Excellent share etc.) come from settings.rules.
   function buildModel(settings, foods, options = {}) {
     const rules = rulesFrom(settings);
     const skip = new Set(options.skip || []);
     const kcalTarget = settings.kcal;
     const realistic = Boolean(options.realistic);
+    const packs = Boolean(options.packs);
 
     // Constraints are named limits on sums of variable attributes
     const constraints = {};
@@ -156,9 +188,6 @@ const Optimizer = (() => {
     // Protein minimum (plans 2 and 3 pass a higher one)
     const proteinMin = typeof options.proteinMin === "number" ? options.proteinMin : settings.protein;
     if (!skip.has("protein")) constraints.protein = { min: proteinMin };
-
-    // Budget: most kr per day
-    if (typeof options.costMax === "number") constraints.cost = { max: options.costMax };
 
     // At least 10 different foods: every food's yes/no variable counts 1 (see the floor below)
     if (realistic) constraints.foodCount = { min: rules.minFoods };
@@ -182,18 +211,29 @@ const Optimizer = (() => {
     // "≤ 0.40 × kcalTarget" from section 5, and "40% of calories" is exactly true.
     if (!skip.has("poor")) constraints.poorKcal = { max: 0 };
 
+    // Does a food that gives at most maxKcal a day need a variety constraint?
+    // Not if that's within 35% of the calorie minimum (only known when that minimum is used).
+    const varietyNeeded = (maxKcal) =>
+      !skip.has("variety") && (skip.has("kcalMin") || maxKcal > rules.varietyKcalShare * constraints.kcal.min);
+
     // One entry per food: its attributes, plus its own limit constraints
     const variables = {};
     // Yes/no variables for the 35 g floor (realistic plans only)
     const binaries = {};
+    // Whole-number variables: the packages per month (plans 2 and 3)
+    const ints = {};
     for (const f of foods) {
       const name = varName(f);
-      const kcal = f.kcalPer100g / 100; // kcal per gram
-      const protein = f.proteinPer100g / 100; // protein grams per gram
+      // Limits in the variable's unit, and how many grams per day one unit is
+      const { unit, min, max, floor } = unitLimits(f, settings, realistic, packs);
+      // Everything below is per unit of the variable: per gram (unit = 1), or
+      // per package per month, which is packGrams ÷ days grams a day
+      const kcal = (f.kcalPer100g / 100) * unit; // kcal per day
+      const protein = (f.proteinPer100g / 100) * unit; // protein grams per day
       const rating = proteinRating(f);
 
       const v = {
-        cost: f.packPrice / f.packGrams, // krPerGram
+        cost: (f.packPrice / f.packGrams) * unit, // kr per day
         kcal,
         protein,
         // 1 − 0.60 for Excellent foods, −0.60 for the rest (see excellentShare above)
@@ -202,24 +242,32 @@ const Optimizer = (() => {
         poorKcal: kcal * ((rating === "poor" ? 1 : 0) - rules.poorKcalShare),
       };
 
-      // Per-food limits: min ≤ grams per day ≤ max.
+      // Per-food limits: min ≤ amount ≤ max (grams per day, or packages).
       // The solver has no variable bounds, so each food gets a constraint
-      // that only it contributes to (1 per gram).
-      const { min, max } = limitsFor(f, settings, realistic);
-      v["limit_" + f.id] = 1;
-      constraints["limit_" + f.id] = { min, max };
+      // that only it contributes to (1 per unit).
+      // In realistic plans a food with min 0 doesn't need it: its "ceiling" below
+      // (amount ≤ max · use) already keeps it under the max. Fewer constraints = faster.
+      const ceilingIsEnough = realistic && max > 0 && min === 0;
+      if (!ceilingIsEnough) {
+        v["limit_" + f.id] = 1;
+        constraints["limit_" + f.id] = { min, max };
+      }
 
-      // The floor: grams is either 0 or at least 35 (or the food's own
-      // minGramsIfUsed from foods.json, e.g. 10 g for fats). A linear model can't
+      // Packages can only be bought whole
+      if (packs) ints[name] = 1;
+
+      // The floor: the amount is either 0 or at least 35 g (or the food's own
+      // minGramsIfUsed from foods.json, e.g. 10 g for fats; with packages, the
+      // fewest packs that give that much). A linear model can't
       // say "either/or" directly, so each food gets a yes/no variable `use`:
-      //   grams − floor · use ≥ 0  (if use = 1, at least the floor)
-      //   grams − max · use ≤ 0    (if use = 0, nothing at all)
+      //   amount − floor · use ≥ 0  (if use = 1, at least the floor)
+      //   amount − max · use ≤ 0    (if use = 0, nothing at all)
       // `use` also counts 1 towards the "at least 10 foods" rule.
-      // Foods with max 0 can't be used anyway, so they don't need one.
+      // Foods with max 0 can't be used anyway, so they don't need one
+      // (with packages that includes foods where one pack is more than their max).
       // The floor is never above the max, so a user max of e.g. 20 g still lets the food in.
       if (realistic && max > 0) {
-        const use = "use_" + f.id;
-        const floor = Math.min(max, typeof f.minGramsIfUsed === "number" ? f.minGramsIfUsed : rules.minGramsIfUsed);
+        const use = useName(f);
         v["floor_" + f.id] = 1;
         v["ceiling_" + f.id] = 1;
         variables[use] = { ["floor_" + f.id]: -floor, ["ceiling_" + f.id]: -max, foodCount: 1 };
@@ -228,13 +276,16 @@ const Optimizer = (() => {
         binaries[use] = 1;
       }
 
-      // This food's grams count towards its group's limit (if the group has one)
-      if (realistic && f.limitGroup && f.limitGroup in groupMax) v["group_" + f.limitGroup] = 1;
+      // This food's grams per day count towards its group's limit (if the group has one)
+      if (realistic && f.limitGroup && f.limitGroup in groupMax) v["group_" + f.limitGroup] = unit;
 
       // Variety: this food's kcal − 0.35 · total kcal ≤ 0.
       // Like the Poor cap, it's measured against the actual total, so no
       // food ever gives more than 35% of the plan's calories.
-      if (!skip.has("variety")) {
+      // A food that gives at most 35% of the calorie minimum even at its max can
+      // never break it (the total is at least that minimum), so it gets no
+      // constraint. That's most foods, and it makes the solver a lot faster.
+      if (varietyNeeded(kcal * max)) {
         const key = "variety_" + f.id;
         constraints[key] = { max: 0 };
         // This food counts once in full and once inside the total
@@ -248,10 +299,10 @@ const Optimizer = (() => {
     // "−0.35 × kcal" in this food's variety constraint (needs all variables to exist first)
     if (!skip.has("variety")) {
       for (const f of foods) {
+        if (!(("variety_" + f.id) in constraints)) continue;
         for (const other of foods) {
           if (other.id === f.id) continue;
-          variables[varName(other)]["variety_" + f.id] =
-            -(other.kcalPer100g / 100) * rules.varietyKcalShare;
+          variables[varName(other)]["variety_" + f.id] = -variables[varName(other)].kcal * rules.varietyKcalShare;
         }
       }
     }
@@ -262,6 +313,7 @@ const Optimizer = (() => {
       constraints,
       variables,
       binaries,
+      ints,
     };
   }
 
@@ -274,11 +326,15 @@ const Optimizer = (() => {
     return solver.Solve(model);
   }
 
-  // Read grams per day for each food out of a solver answer (tiny values → 0)
-  function gramsFrom(answer, foods) {
+  // Read grams per day for each food out of a solver answer (tiny values → 0).
+  // days is given for answers in whole packages per month (plans 2 and 3):
+  // grams per day = packages × pack size ÷ days.
+  function gramsFrom(answer, foods, days) {
     const grams = {};
     for (const f of foods) {
-      const x = answer[varName(f)] || 0;
+      const value = answer[varName(f)] || 0;
+      // Packages: round away the solver's tiny errors (2.9999999 → 3)
+      const x = days ? (Math.round(value) * f.packGrams) / days : value;
       grams[f.id] = x >= MIN_GRAMS_PER_DAY ? x : 0;
     }
     return grams;
@@ -306,6 +362,7 @@ const Optimizer = (() => {
 
       // Monthly grams, then packages: always round up so you never run short.
       // The small −1e-9 stops 3000.0000001 g / 1000 g packs becoming 4 packs.
+      // (Plans 2 and 3 are already in whole packages, so this gives back exactly those.)
       const monthlyGrams = gramsPerDay * days;
       const packages = Math.ceil(monthlyGrams / f.packGrams - 1e-9);
       const cost = packages * f.packPrice;
@@ -322,10 +379,6 @@ const Optimizer = (() => {
         packages,
         cost,
         packGrams: f.packGrams,
-        // What's left at the end of the period because we rounded up
-        leftoverGrams: packages * f.packGrams - monthlyGrams,
-        // More than half a pack left over: worth a warning on the grocery list
-        largeLeftover: packages * f.packGrams - monthlyGrams > f.packGrams / 2,
         // Piece foods (eggs, cans, bars): also give the piece count
         piecesPerDay: f.pieceGrams ? gramsPerDay / f.pieceGrams : null,
         piecesToBuy: f.pieceGrams ? Math.round((packages * f.packGrams) / f.pieceGrams) : null,
@@ -575,6 +628,253 @@ const Optimizer = (() => {
     return result;
   }
 
+  // ---------- Whole packages (plans 2 and 3, PLAN.md section 5) ----------
+  //
+  // With whole packages the solver's own branch and bound can take minutes for some
+  // settings, which is far too slow on a phone. So plans 2 and 3 are found in steps
+  // that each stay small (see solvePacks):
+  //   1. Choose the foods: solve with "used" as real yes/no but packs allowed in
+  //      between (e.g. 2.4 packs). That's quick, and no plan can be cheaper than it.
+  //   2. Whole packs for exactly those foods: the solver on just those ~10 foods, and
+  //      also that answer rounded and repaired, one or two packs at a time.
+  //   3. Lower the cost further one or two packs at a time (this can swap foods too).
+  //   4. Try the next-best choice of foods, up to 3 in all, unless step 1 already
+  //      shows that no other choice can be cheaper.
+  // The answer is the cheapest plan found: usually the cheapest there is, sometimes a
+  // few percent more.
+
+  // How much a rule may be broken and still count as kept (rounding errors)
+  const RULE_TOLERANCE = 1e-6;
+  // Most repair or improve moves per starting point (a safety limit; normally far fewer)
+  const MAX_MOVES = 300;
+
+  // Turn a buildModel() model with packs into lists the search can work with quickly:
+  //   rules – every constraint: { min, max, scale }
+  //   foods – per food: its variable name, the packs allowed and its coefficients
+  //           (for the packs variable and for its yes/no "used" variable)
+  function packProblem(model, settings, foods) {
+    const ruleNames = Object.keys(model.constraints);
+    const index = {};
+    const rules = ruleNames.map((name, i) => {
+      index[name] = i;
+      const c = model.constraints[name];
+      return {
+        min: typeof c.min === "number" ? c.min : -Infinity,
+        max: typeof c.max === "number" ? c.max : Infinity,
+        scale: 0, // the largest coefficient in this rule, filled in below
+      };
+    });
+    // A variable's coefficients as [rule index, coefficient] pairs (the cost isn't a rule)
+    const entriesOf = (variable) =>
+      Object.keys(variable || {})
+        .filter((key) => key in index)
+        .map((key) => [index[key], variable[key]]);
+
+    const items = foods.map((f) => {
+      // Packs allowed, the same as in buildModel
+      const limit = unitLimits(f, settings, true, true);
+      return {
+        name: varName(f),
+        cost: model.variables[varName(f)].cost,
+        min: limit.min,
+        max: limit.max,
+        // The fewest packs if the food is used: its own min, or the floor
+        lowestUsed: Math.max(limit.min, limit.max > 0 ? limit.floor : 0),
+        entries: entriesOf(model.variables[varName(f)]),
+        useEntries: entriesOf(model.variables[useName(f)]),
+      };
+    });
+
+    // Scale each rule by its largest coefficient, so a broken kcal rule and a broken
+    // protein rule weigh about the same (both "about one pack too much or too little")
+    for (const item of items) {
+      for (const [r, coef] of [...item.entries, ...item.useEntries]) {
+        rules[r].scale = Math.max(rules[r].scale, Math.abs(coef));
+      }
+    }
+    for (const rule of rules) rule.scale = rule.scale || 1;
+    return { rules, items };
+  }
+
+  // A search state: packs per food, every rule's current sum, how much the rules are broken and the cost
+  function packState(problem, packs) {
+    const state = { packs: packs.slice(), sums: new Float64Array(problem.rules.length), broken: 0, cost: 0 };
+    problem.items.forEach((item, i) => {
+      const n = state.packs[i];
+      state.cost += item.cost * n;
+      for (const [r, coef] of item.entries) state.sums[r] += coef * n;
+      if (n > 0) for (const [r, coef] of item.useEntries) state.sums[r] += coef;
+    });
+    problem.rules.forEach((rule, r) => (state.broken += brokenBy(rule, state.sums[r])));
+    return state;
+  }
+
+  // How far a rule's sum is outside its min and max, in "packs" (0 when it's kept)
+  function brokenBy(rule, sum) {
+    const amount = Math.max(0, rule.min - sum, sum - rule.max) / rule.scale;
+    return amount > RULE_TOLERANCE ? amount : 0;
+  }
+
+  // Change one food to n packs, updating the sums, the broken amount and the cost
+  function setPacks(problem, state, i, n) {
+    const item = problem.items[i];
+    const old = state.packs[i];
+    if (n === old) return;
+    // Its yes/no "used" variable changes when it goes from 0 to some packs or back
+    const useChange = (n > 0 ? 1 : 0) - (old > 0 ? 1 : 0);
+    const change = (r, by) => {
+      state.broken -= brokenBy(problem.rules[r], state.sums[r]);
+      state.sums[r] += by;
+      state.broken += brokenBy(problem.rules[r], state.sums[r]);
+    };
+    for (const [r, coef] of item.entries) change(r, coef * (n - old));
+    if (useChange) for (const [r, coef] of item.useEntries) change(r, coef * useChange);
+    state.packs[i] = n;
+    state.cost += item.cost * (n - old);
+  }
+
+  // The amounts a food can move to from n packs: one more and one fewer.
+  // Below the fewest packs if used, the only other choice is 0 (if its min allows that).
+  function nextPacks(item, n) {
+    const options = [];
+    const up = n === 0 ? item.lowestUsed : n + 1;
+    if (up <= item.max && up > n) options.push(up);
+    const down = n <= item.lowestUsed ? 0 : n - 1;
+    if (down < n && down >= item.min) options.push(down);
+    return options;
+  }
+
+  // Every move of one food, or of two foods at once: [[i, n], ...]
+  function allMoves(problem, state) {
+    const singles = [];
+    problem.items.forEach((item, i) => {
+      for (const n of nextPacks(item, state.packs[i])) singles.push([i, n]);
+    });
+    const moves = singles.map((move) => [move]);
+    for (let a = 0; a < singles.length; a++) {
+      for (let b = a + 1; b < singles.length; b++) {
+        if (singles[a][0] !== singles[b][0]) moves.push([singles[a], singles[b]]);
+      }
+    }
+    return moves;
+  }
+
+  // Try a move, read the broken amount and cost it gives, then undo it
+  function tryMove(problem, state, move) {
+    const before = move.map(([i]) => [i, state.packs[i]]);
+    for (const [i, n] of move) setPacks(problem, state, i, n);
+    const result = { broken: state.broken, cost: state.cost };
+    for (const [i, n] of before.reverse()) setPacks(problem, state, i, n);
+    return result;
+  }
+
+  // From a starting point, repair until every rule is kept, then lower the cost.
+  // Returns the state, or null if it couldn't be repaired.
+  function packSearch(problem, start) {
+    const state = packState(problem, start);
+    for (let step = 0; step < MAX_MOVES; step++) {
+      const repairing = state.broken > RULE_TOLERANCE;
+      let best = null;
+      let bestScore = null;
+      for (const move of allMoves(problem, state)) {
+        const after = tryMove(problem, state, move);
+        if (repairing) {
+          // Repair: break the rules less; at the same amount, the cheaper move
+          if (after.broken < state.broken - RULE_TOLERANCE &&
+              (!best || after.broken < bestScore.broken - RULE_TOLERANCE ||
+                (Math.abs(after.broken - bestScore.broken) <= RULE_TOLERANCE && after.cost < bestScore.cost))) {
+            best = move;
+            bestScore = after;
+          }
+        } else if (after.broken <= RULE_TOLERANCE && after.cost < state.cost - RULE_TOLERANCE && (!best || after.cost < bestScore.cost)) {
+          // Improve: keep every rule and save the most money
+          best = move;
+          bestScore = after;
+        }
+      }
+      if (!best) break; // no move helps any more
+      for (const [i, n] of best) setPacks(problem, state, i, n);
+    }
+    // (Adding and subtracting leaves tiny rounding errors, so "kept" means within the tolerance)
+    return state.broken <= RULE_TOLERANCE ? state : null;
+  }
+
+  // A starting point in whole packs from amounts in packs (e.g. 2.6 → 3), kept
+  // inside each food's limits. Below the fewest packs if used, it's that number or 0, whichever is nearer.
+  function roundPacks(problem, amounts) {
+    return problem.items.map((item, i) => {
+      let n = Math.round(amounts[i]);
+      if (n > 0 && n < item.lowestUsed) n = amounts[i] >= item.lowestUsed / 2 ? item.lowestUsed : 0;
+      return Math.min(item.max, Math.max(item.min, n));
+    });
+  }
+
+  // How many choices of foods solvePacks tries at most (step 4)
+  const MAX_FOOD_CHOICES = 3;
+  // Time limits for the solver's own branch and bound, in ms. Only a safety net:
+  // normally each run takes a few to a few dozen ms.
+  const CHOOSE_TIMEOUT = 1500;
+  const FIXED_FOODS_TIMEOUT = 300;
+
+  // Plans 2 and 3: the plan in whole packages per month (see the steps above).
+  // Returns an answer like solve() does: { feasible, result, food_<id>: packages, ... }
+  function solvePacks(settings, foods, options) {
+    const model = buildModel(settings, foods, options);
+    const problem = packProblem(model, settings, foods);
+    // With whole-kr prices, a different plan only counts as cheaper if it saves at
+    // least 1 kr a month (in kr per day, like the model). Otherwise any amount counts.
+    const saving = foods.every((f) => Number.isInteger(f.packPrice)) ? 1 / settings.days : RULE_TOLERANCE;
+
+    // The cheapest plan found so far (a search state from packSearch)
+    let best = null;
+    const consider = (packs) => {
+      const found = packs && packSearch(problem, packs);
+      if (found && (!best || found.cost < best.cost)) best = found;
+    };
+
+    // Step 1 with "not exactly these foods" rules added for the choices already tried
+    const choose = { ...model, ints: {}, constraints: { ...model.constraints }, variables: { ...model.variables },
+      options: { timeout: CHOOSE_TIMEOUT } };
+
+    for (let choice = 0; choice < MAX_FOOD_CHOICES; choice++) {
+      // 1. Choose the foods. No answer: no (other) choice of foods works.
+      const chosen = solve(choose);
+      if (!chosen.feasible) break;
+      // Not even packs in between can save money: the plan found is the cheapest
+      if (best && chosen.result > best.cost - saving) break;
+      const used = foods.filter((f) => (chosen[useName(f)] || 0) > 0.5);
+
+      // 2a. The solver on just those foods, each of them used, in whole packs
+      const fixed = buildModel(settings, used, options);
+      for (const f of used) {
+        fixed.constraints["used_" + f.id] = { min: 1 };
+        fixed.variables[useName(f)] = { ...fixed.variables[useName(f)], ["used_" + f.id]: 1 };
+      }
+      const answer = solve({ ...fixed, options: { timeout: FIXED_FOODS_TIMEOUT } });
+      // Use it only if it's really in whole packs (a timed-out answer may not be)
+      if (answer.feasible) {
+        const amounts = foods.map((f) => answer[varName(f)] || 0);
+        if (amounts.every((x) => Math.abs(x - Math.round(x)) < 1e-6)) consider(amounts.map(Math.round));
+      }
+      // 2b. Step 1's answer rounded to whole packs, then repaired. 3. Both get cheaper in packSearch.
+      consider(roundPacks(problem, problem.items.map((item) => chosen[item.name] || 0)));
+
+      // 4. Next time, not exactly these foods: Σ used (these) − Σ used (others) ≤ count − 1
+      const rule = "notChoice_" + choice;
+      choose.constraints[rule] = { max: used.length - 1 };
+      for (const f of foods) {
+        if (!choose.variables[useName(f)]) continue;
+        choose.variables[useName(f)] = { ...choose.variables[useName(f)], [rule]: used.includes(f) ? 1 : -1 };
+      }
+    }
+    if (!best) return { feasible: false };
+
+    // Back to the solver's answer format
+    const answer = { feasible: true, result: best.cost };
+    problem.items.forEach((item, i) => (answer[item.name] = best.packs[i]));
+    return answer;
+  }
+
   // ---------- Three plans (PLAN.md section 5, "Three plans") ----------
 
   // Names shown on the plans, keyed the same way planAll returns them
@@ -595,10 +895,10 @@ const Optimizer = (() => {
     if (which === "highQuality") {
       return {
         settings: { ...settings, rules: { ...(settings.rules || {}), excellentProteinShare: rules.highQualityExcellentShare } },
-        options: { realistic: true, groups, proteinMin: settings.protein + rules.highQualityProteinExtra },
+        options: { realistic: true, packs: true, groups, proteinMin: settings.protein + rules.highQualityProteinExtra },
       };
     }
-    return { settings, options: { realistic: true, groups, proteinMin: settings.protein + rules.proteinBuffer } };
+    return { settings, options: { realistic: true, packs: true, groups, proteinMin: settings.protein + rules.proteinBuffer } };
   }
 
   // Plan 2 or 3 has no solution: explain why.
@@ -612,10 +912,16 @@ const Optimizer = (() => {
     // Any food can help with the food count; cheapest protein first
     const anyIdeas = suggestFoods(catalog, foods, () => true);
 
-    // Too few foods ticked for the "at least 10 foods" rule (foods with max 0 don't count)
-    const usable = foods.filter((f) => limitsFor(f, setup.settings, true).max > 0).length;
+    // Too few foods ticked for the "at least 10 foods" rule. Foods with max 0 don't
+    // count, and neither do foods where one pack for the whole period is more than their max per day.
+    const usable = foods.filter((f) => unitLimits(f, setup.settings, true, true).max > 0).length;
     if (usable < rules.minFoods) {
-      const zeroMax = foods.length > usable ? " Foods you set to max 0 g don't count." : "";
+      const tooBig = foods.filter((f) => limitsFor(f, setup.settings, true).max > 0 && unitLimits(f, setup.settings, true, true).max === 0);
+      const zeroMax =
+        (foods.some((f) => limitsFor(f, setup.settings, true).max === 0) ? " Foods you set to max 0 g don't count." : "") +
+        (tooBig.length
+          ? ` ${joinNames(tooBig.map((f) => f.name), "and")} can't be used either: one pack lasts longer than ${setup.settings.days} days at its max per day.`
+          : "");
       problems.push({
         code: "minFoods",
         message:
@@ -642,7 +948,7 @@ const Optimizer = (() => {
         code: "realistic",
         message:
           `The realistic rules (at least ${rules.minFoods} different foods, at least ${rules.minGramsIfUsed} g ` +
-          `of each food you eat, realistic max amounts and food-group limits) can't all be met with these ` +
+          `of each food you eat, whole packages, realistic max amounts and food-group limits) can't all be met with these ` +
           `foods at ${Math.round(setup.options.proteinMin)} g protein. ` +
           `Add a few more foods` + (anyIdeas ? `, e.g. ${anyIdeas}.` : ".") +
           ownMaxHint(userLimits, foods),
@@ -654,10 +960,14 @@ const Optimizer = (() => {
   // Plan 2: lowest cost with the realistic rules and the protein buffer
   function planRealistic(settings, foods, groups, catalog = []) {
     const setup = realisticSetup(settings, groups, "realistic");
-    const answer = solve(buildModel(setup.settings, foods, setup.options));
+    const answer = solvePacks(setup.settings, foods, setup.options);
     if (!answer.feasible) return noPlan(diagnoseRealistic(setup, foods, catalog));
+    return realisticPlan(settings, foods, gramsFrom(answer, foods, settings.days), catalog);
+  }
 
-    const result = summarise(settings, foods, gramsFrom(answer, foods));
+  // Plan 2's grocery list from grams per day, with the over-budget message if needed
+  function realisticPlan(settings, foods, grams, catalog = []) {
+    const result = summarise(settings, foods, grams);
     result.status = "optimal";
     result.messages = [];
     if (result.totals.overBudget) {
@@ -694,29 +1004,17 @@ const Optimizer = (() => {
 
     const setup = realisticSetup(settings, groups, "highQuality");
 
-    // Without the budget ceiling first: does a high quality plan exist at all?
-    const unlimited = solve(buildModel(setup.settings, foods, setup.options));
-    if (!unlimited.feasible) return noPlan(diagnoseRealistic(setup, foods, catalog));
+    // Does a high quality plan exist at all?
+    const answer = solvePacks(setup.settings, foods, setup.options);
+    if (!answer.feasible) return noPlan(diagnoseRealistic(setup, foods, catalog));
 
-    // The solver works per day, so the monthly budget becomes kr per day
-    let costMax = settings.budget / settings.days;
-    let result = null;
+    // Whole packages cost exactly what the solver says, and this is the cheapest
+    // high quality plan, so the budget ceiling is simply: does this one fit?
+    const result = summarise(settings, foods, gramsFrom(answer, foods, settings.days));
 
-    // Rounding up to whole packs makes the shopping cost a bit higher than the
-    // solver's cost. If that goes over budget, lower the cap and solve again.
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const answer = solve(buildModel(setup.settings, foods, { ...setup.options, costMax }));
-      if (!answer.feasible) break;
-      result = summarise(settings, foods, gramsFrom(answer, foods));
-      if (!result.totals.overBudget) break;
-
-      // Lower the daily cap by how much the rounding went over, and try again
-      costMax -= result.totals.overBy / settings.days;
-    }
-
-    // Over budget (or only over after rounding): no plan, but say what it would cost
-    if (!result || result.totals.overBudget) {
-      const cost = (result || summarise(settings, foods, gramsFrom(unlimited, foods))).totals.shoppingCost;
+    // Over budget: no plan, but say what it would cost
+    if (result.totals.overBudget) {
+      const cost = result.totals.shoppingCost;
       return noPlan([
         {
           code: "budget",
@@ -742,8 +1040,17 @@ const Optimizer = (() => {
   // catalog (optional) is every food in foods.json, so messages can suggest foods to add.
   function planAll(settings, foods, groups = [], catalog = []) {
     const cheapest = plan(settings, foods, catalog);
-    const realistic = planRealistic(settings, foods, groups, catalog);
+    let realistic = planRealistic(settings, foods, groups, catalog);
     const highQuality = planHighQuality(settings, foods, groups, realistic, catalog);
+
+    // The whole-package search finds a very cheap plan, not always the cheapest one.
+    // A high quality plan also keeps every rule of plan 2, so if it came out cheaper,
+    // it's plan 2's answer too (and the cost order plan 2 ≤ plan 3 holds).
+    if (highQuality.status === "optimal" && highQuality.totals.shoppingCost < realistic.totals.shoppingCost) {
+      const grams = {};
+      for (const item of highQuality.items) grams[item.id] = item.gramsPerDay;
+      realistic = realisticPlan(settings, foods, grams, catalog);
+    }
 
     const plans = { cheapest, realistic, highQuality };
     for (const key of Object.keys(plans)) {
