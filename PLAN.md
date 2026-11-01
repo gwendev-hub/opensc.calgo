@@ -93,7 +93,7 @@ Derived in code, not stored:
 - `proteinPer100kcal = proteinPer100g / kcalPer100g * 100`
 - **Protein rating**, see section 4 (Excellent / OK / Poor).
 
-`maxGramsPerDay` is a sensible default so the optimizer doesn't suggest 600 g of lentils a day. Users can override it.
+`maxGramsPerDay` is a sensible default so the optimizer doesn't suggest 600 g of lentils a day. Users can override it with their own min and max per food (section 6, Foods tab).
 
 ### Optional fields for the realistic plans (plans 2 and 3, section 5)
 Only some foods have these. Plan 1 ignores them.
@@ -262,7 +262,7 @@ For each food *i* in My foods, the variable is **xᵢ = grams per day**.
 **Subject to:**
 - Calories within a range: `Σ kcalᵢ · xᵢ/100 ≥ kcalTarget × 0.95` and `≤ kcalTarget`
 - Protein minimum: `Σ proteinᵢ · xᵢ/100 ≥ proteinMin`
-- Per-food limits: `minᵢ ≤ xᵢ ≤ maxᵢ` (min defaults to 0)
+- Per-food limits: `minᵢ ≤ xᵢ ≤ maxᵢ` (min defaults to 0). The user's own min and max (`settings.limits`, from the Foods tab) always win, in all three plans: an own min above the default max raises the max to that min (e.g. kvarg min 320 g in plan 2, whose realistic max is 300 g → max 320 g), and an own max of 0 keeps the food out.
 - **Variety:** no single food gives more than 35% of total calories (`kcalᵢ · xᵢ/100 − 0.35 · Σ_all kcalⱼ·xⱼ/100 ≤ 0`). Without this, the cheapest answer is boring, e.g. mostly lentils and oats.
 - **Protein quality (section 4.3)**, written so it stays linear:
   - Excellent share: `Σ_{i∈Excellent} proteinᵢ·xᵢ/100 − 0.60 · Σ_all proteinᵢ·xᵢ/100 ≥ 0`
@@ -283,7 +283,7 @@ The optimizer makes three plans from the same settings and My foods (`Optimizer.
 | Food-group limits (`data/groups.json`) | – | ✔ dairy ≤ 700 g, dry grains ≤ 200 g | ✔ |
 | Budget | compared after solving | compared after solving | **ceiling: total cost ≤ monthly budget**, otherwise no plan |
 
-- **0 or ≥ 35 g** can't be written as a plain linear rule, so each food gets a yes/no (binary) variable `useᵢ`: `xᵢ − floorᵢ · useᵢ ≥ 0` and `xᵢ − maxᵢ · useᵢ ≤ 0`, where `floorᵢ` is 35 g or the food's `minGramsIfUsed`. The solver then does branch and bound, which takes well under a second for the starter list.
+- **0 or ≥ 35 g** can't be written as a plain linear rule, so each food gets a yes/no (binary) variable `useᵢ`: `xᵢ − floorᵢ · useᵢ ≥ 0` and `xᵢ − maxᵢ · useᵢ ≤ 0`, where `floorᵢ` is 35 g or the food's `minGramsIfUsed`, but never more than the food's max (so an own max of 20 g still lets the food in, at exactly 20 g). The solver then does branch and bound, which takes well under a second for the starter list.
 - **At least 10 foods** uses the same yes/no variables: `Σ useᵢ ≥ 10`.
 - **Food-group limits:** `Σ_{i∈group} xᵢ ≤ group max` for each group in `data/groups.json`.
 - **Plan 3 and rounding:** the solver budget is `budget / days` kr per day, but rounding up to whole packs costs a bit more. If the rounded cost goes over budget, plan 3 is solved again with the daily cap lowered by the overshoot (up to 8 tries).
@@ -297,14 +297,18 @@ The optimizer makes three plans from the same settings and My foods (`Optimizer.
 2. **Packages to buy** = `ceil(monthlyGrams / packGrams)`. For piece foods, also show the piece count.
 3. Shopping cost = `packages × packPrice`. Compare it with the budget.
 4. Show the daily kcal and protein actually reached, and the leftover amount from rounding up (e.g. "about 200 g of rice left over").
+5. **Large leftovers:** each item gets `largeLeftover: true` when more than half a pack is left at the end of the period (`leftoverGrams > packGrams / 2`). The grocery list marks those foods and lists them in a warning.
 
 ### When there's no solution (infeasible)
-Never just say "no solution". Tell the user why:
+Never just say "no solution". Tell the user **why and what to change**. Every message ends with something to do (add, raise, lower, use another plan):
+- **Suggested foods** come from the full food list: `planAll(settings, foods, groups, catalog)` gets every food in `foods.json` as `catalog` and names up to 3 foods that aren't in My foods yet, with the right rating, cheapest protein first, in quotes (e.g. *“Soy mince, dry”, “Greek yoghurt 0%” or “Firm tofu”*). No food names are hard-coded. Without a catalog (or when every fitting food is already in My foods) the message falls back to raising the max limits.
+- **Own limits are named:** if the user set their own max on foods in My foods, the message adds *"You set your own max for “Keso 4%” in My foods; raising it may help."* Own minimums that are too much are named in the minimums message.
 1. Check whether the protein and calorie targets are reachable at all with My foods and the max limits. If not, say: *"With these foods you can reach at most X g protein within Y kcal. Add more high-protein foods or raise the max limits."*
-   - If the protein quality rules are what blocks it, say so: *"My foods has too few Excellent protein foods to get 60% of your protein from them. Add e.g. keso, kvarg, tuna or tofu."*
-2. If they're reachable but the cheapest solution is over budget, say: *"The cheapest plan costs Z kr, which is W kr over budget."* Still show that plan.
-3. **Plans 2 and 3** first check the food count: *"This plan needs at least 10 different foods, but only N are in My foods. Add more foods."* Then, if the plan fails even without the floor, 10 foods and group limits, they run the checks in point 1 with their own targets (115 g or 130 g protein, 60% or 80% Excellent, realistic max limits). Otherwise it's the realistic rules together: *"The realistic rules … can't all be met with these foods at X g protein. Add a few more foods."*
-4. **Plan 3** has no plan if plan 2 has none (same reasons), if the budget is below plan 2's cost (*"Your budget of X kr is less than the cheapest realistic plan (Y kr), so no realistic plan fits. Raise the budget or add cheaper foods."*), or if the high quality plan costs more than the budget: *"The high quality plan costs X kr, which is W kr over your budget of B kr."*
+   - If the protein quality rules are what blocks it, say so: *"My foods has too few Excellent protein foods to get 60% of your protein from them. Add more Excellent foods like …"*
+   - Minimums too high: *"Your minimum amounts alone are more than 1700 kcal. Lower the min limits of “Rapeseed oil” in My foods, or raise your daily calories."*
+2. If they're reachable but the cheapest solution is over budget, say: *"The cheapest plan costs Z kr, which is W kr over budget. To fit, raise the budget to at least Z kr, lower your protein or calorie target, or try adding cheap protein foods like …"* Still show that plan. Plan 2 says the same with "cheapest realistic plan".
+3. **Plans 2 and 3** first check the food count: *"This plan needs at least 10 different foods, but only N are in My foods. Add 1 more, e.g. …"* (foods with an own max of 0 don't count, and the message says so). Then, if the plan fails even without the floor, 10 foods and group limits, they run the checks in point 1 with their own targets (115 g or 130 g protein, 60% or 80% Excellent, realistic max limits). Otherwise it's the realistic rules together: *"The realistic rules … can't all be met with these foods at X g protein. Add a few more foods."*
+4. **Plan 3** has no plan if plan 2 has none (same reasons), if the budget is below plan 2's cost (*"Your budget of X kr is less than the cheapest realistic plan (Y kr), so no realistic plan fits. Raise the budget to at least Y kr, or use the Absolute cheapest plan."*), or if the high quality plan costs more than the budget: *"The high quality plan costs X kr, which is W kr over your budget of B kr. Raise the budget to at least X kr, or use the Cheapest realistic plan, which fits."*
 
 ### v0.1 improvement (only if rounding causes problems)
 Switch the variables to **whole packages per month**, using integer variables in the same solver. Then the budget is exact and nothing needs rounding. Do this only after v0 works.
@@ -322,7 +326,8 @@ Still one `index.html`, split into **four tabs**. Switching tabs only shows one 
    - **Search bar** at the top ("Add a food"). Focusing it opens the **full food list in a scrollable dropdown** under it; each row shows the name, its category and the protein rating badge, plus **+** (tap to add) or **✓** (already in My foods; tapping does nothing). If an alias matched, it's shown after the name, e.g. *Canned tuna “tonfisk”*. Typing filters the list live (matching rules in section 3). Tapping a result adds it to My foods and keeps the dropdown open, so you can add several. Arrow keys and Enter work on a computer. The dropdown closes on **Escape** or a **tap outside** the search box (which also closes the phone keyboard).
    - **Phone keyboard:** focusing the search scrolls it to the top of the screen; the dropdown's height is set to the room left above the keyboard (`window.visualViewport`) and it scrolls on its own. While it's open the bottom tab bar is hidden, so it can't cover the list. Result rows are 48 px tall, the input 44 px.
    - The personal target-density line.
-   - **My foods (N):** only the foods you've added, grouped by category and sorted with the "Sort by" choice. Each food has a ticked checkbox (untick = remove it from My foods; the whole row is the tap target, ≥ 44 px), its rating badge (green, yellow or red), small fibre and ⚠ sat. fat badges (section 4.5), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. If it's empty, a hint says to search to add foods. Tapping a food opens its min/max fields (advanced, hidden by default; step 6).
+   - **My foods (N):** only the foods you've added, grouped by category and sorted with the "Sort by" choice. Each food has a ticked checkbox on the left (untick = remove it from My foods; a 44 × 44 px tap area), its rating badge (green, yellow or red), small fibre and ⚠ sat. fat badges (section 4.5), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. If it's empty, a hint says to search to add foods.
+   - **Own min/max per food:** tapping a food (everything right of the checkbox, ≥ 44 px) opens a small editor under it with **Min g/day** and **Max g/day**. Empty = use the defaults (min 0, `maxGramsPerDay`; the hint also gives `realisticMaxGramsPerDay` if the food has one). **Save** (or Enter) checks the values (numbers ≥ 0, min ≤ max; otherwise an error and nothing is saved) and closes it; **Reset** removes the food's own limits. Tapping the food again closes the editor. Foods with own limits show a small green marker, e.g. *Own limit 60–120 g*, *≥ 100 g* or *≤ 0 g*. Saved per food id in `localStorage` under `pbp.limits` (`{ "keso": { "min": 60, "max": 120 } }`, wrapped in try/catch; unknown ids and bad values are dropped on load). Only the limits of foods in My foods go to the optimizer (`settings.limits`). Changing them marks the plans out of date.
    - **The optimizer uses only My foods.**
    - **Saved:** the ids are kept in `localStorage` under `pbp.myFoods` (a list, wrapped in try/catch). On the **first visit** (nothing saved) My foods is the starter set (`"starter": true`). **Moving old users over:** if only the old `pbp.ticks` is saved (`{ id: false }` for unticked foods, everything else counted as ticked), My foods becomes every food that wasn't unticked, and `pbp.ticks` is removed once My foods is saved. A saved empty list stays empty. Ids no longer in `foods.json` are dropped.
 3. **Plans tab** (plans and the grocery list together on one page; there is no separate List tab any more):
@@ -335,8 +340,19 @@ Still one `index.html`, split into **four tabs**. Switching tabs only shows one 
      - Messages, e.g. over budget, or why the plan isn't possible
      - Grocery table: food, rating badge, amount per day, packages, cost, and a total
      - **Protein quality** section (section 4.4)
-     - A "Copy list" button that copies plain text to paste into Notes or a message (step 6)
-     - Warnings such as large leftovers (step 5)
+     - **Large leftovers:** foods with more than half a pack left at the end of the period get *⚠ 620 g left* under their pack count, and a yellow box lists them (*"Rice, dry: about 620 g of a 1,000 g pack"*).
+     - **Copy list** button (full width) under the table: copies the selected plan as plain text to paste into Notes or a message, then says **Copied ✓** for 2 seconds. Uses `navigator.clipboard` (https or localhost); otherwise the old copy command; if both fail, the text is shown in a box to select by hand. The text (`copyListText(plan, days)` in `app.js`):
+       ```
+       Cheapest realistic – 30 days
+
+       Eggs & dairy
+       Eggs (12 × 60 g) 720 g – 2 packs (24 pcs) – 90 kr
+       Keso 4% 250 g – 7 packs – 154 kr
+
+       Total: 1,352 kr (budget 4,000 kr)
+       Per day: 115 g protein · 1,615 kcal
+       ```
+       Grouped by category in `foods.json` order; one line per food with name, pack size (left out if the name already has it, e.g. *Barebells bar 55 g*), packs ("1 pack" / "N packs", pieces for foods with several per pack) and cost.
    - A last open tab saved as `"list"` (from before the merge) opens Plans.
 4. **Macros tab** (for the selected plan; before the first run it says to make plans first, with a "Go to Plans" button). Pie-chart icon. See section 4.5:
    - Plan switcher with the three plans at the top (tapping one stays on Macros)
@@ -360,8 +376,9 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 4. **Wire it up:** the button runs the optimizer, rounds up to packages and renders the result card, including the protein quality section.
    *Done when:* a real plan is shown with cost, kcal, protein and the Excellent/OK/Poor breakdown.
 5. **Infeasible and over-budget messages,** as described in section 5.
-   *Done when:* each failure case shows a helpful message instead of an empty result.
-6. **Min/max per food, and Copy list.**
+   *Done when:* each failure case shows a helpful message instead of an empty result, saying why and what to change (test 35).
+6. **Min/max per food, Copy list and large-leftover warning** (section 6, Foods and Plans tabs).
+   *Done when:* own limits are saved and respected by all three plans, Copy list pastes a readable list, and large leftovers are flagged (tests 31–34).
 7. **Polish for the phone:** tap targets of at least 44 px, readable on a small screen, and a dark mode that follows the phone setting.
 8. **Feedback:** add a link to a short Google Form, then share the page link with friends.
 
@@ -401,8 +418,13 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 28 | Adding and removing (real `index.html`) | Unticking keso removes it from My foods, the saved list and what the optimizer gets; searching "cottage" and tapping keso adds it back under its category, saves it and shows ✓; tapping it again changes nothing; the row (untick control) ≥ 44 px |
 | 29 | The optimizer uses only My foods (real `index.html`) | With 12 foods in My foods, the button makes the same three plans (foods and totals) as `Optimizer.planAll` with only those 12, and no grocery list has any other food |
 | 30 | Starter set and moving old ticks over (reloads `index.html`) | 12–18 foods have `"starter": true` and give three valid plans; first visit (nothing saved) shows and saves exactly the starter set; old `pbp.ticks` with keso and oil unticked becomes every other food, and `pbp.ticks` is removed; a saved empty list stays empty |
+| 31 | Own min/max in all three plans | Limits eggs min 100, keso 60–120, tofu max 20, kvarg min 320, rice max 0: every plan finds a plan with each food inside its limits; kvarg's realistic max is raised to 320; tofu's floor in plans 2 and 3 is lowered to 20 g |
+| 32 | Min/max editor (real `index.html`) | Tapping keso opens its editor (empty max shows 300 as a hint); min 150 / max 100 shows an error and saves nothing; 60 / 120 is saved under `pbp.limits`, closes the editor and shows the marker on keso only; the plans keep keso between 60 and 120 g; reopening shows 60 / 120; Reset removes the limits and the marker and marks plans out of date; food button and untick area ≥ 44 px |
+| 33 | Copy list | `copyListText` on a hand-made plan gives exactly the text from section 6 (categories in order, pieces for eggs, no double pack size for Barebells, "1 pack"); on the page the button copies the selected plan (clipboard replaced by a stand-in) and says "Copied ✓" |
+| 34 | Large leftover warning | With 7 days, every item's `largeLeftover` is true exactly when more than half a pack is left (and some are); on the page each plan's warning box and table markers list exactly those foods |
+| 35 | Failed plans say why and what to change | For rice + apples, Poor/OK foods only, budgets 500 / 1,300 / 1,500, 9 foods, oil min 200 g and own max 0 on keso and tuna: every message has something to do; "too few Excellent" names Excellent foods from `foods.json` that aren't in My foods; the minimums message names the oil; own max limits are pointed out |
 
-"Tuna" in tests 4, 8 and 9 means both tuna products (canned and frozen). Test 4 also uses a food set where tuna is normally picked, and test 6 adds a stress case (quality rules off, every max × 10) so the variety cap actually has to do something. `test.html` also shows the three default plans side by side. The page tests start with every food in My foods, and the user's own saved data (`pbp.*` in `localStorage`) is put back after the run.
+"Tuna" in tests 4, 8 and 9 means both tuna products (canned and frozen). Test 4 also uses a food set where tuna is normally picked, and test 6 adds a stress case (quality rules off, every max × 10) so the variety cap actually has to do something. `test.html` also shows the three default plans side by side. The page tests start with every food in My foods and no own min/max, and the user's own saved data (`pbp.*` in `localStorage`) is put back after the run.
 
 ---
 

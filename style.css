@@ -121,16 +121,26 @@ select {
   padding: 0;
 }
 
-/* Each food row is one big label, so tapping anywhere ticks the box */
+/* Each food row: the checkbox on the left (untick to remove), the food itself on the right
+   (tap to open its min/max editor) */
 .food {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: stretch;
   min-height: 44px;
   margin: 0;
-  padding: 10px 0;
   border-top: 1px solid var(--border);
-  font-weight: normal;
+}
+
+/* The checkbox sits in a 44 × 44 px tap area, so it's easy to hit */
+.food-tick {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding-top: 12px;
   cursor: pointer;
 }
 
@@ -138,15 +148,75 @@ select {
 .food input[type="checkbox"] {
   width: 22px;
   height: 22px;
-  margin: 2px 0 0;
-  flex-shrink: 0;
+  margin: 0;
   accent-color: var(--accent);
 }
 
-/* Food name and its numbers stack on top of each other */
+/* The food's name and numbers: a plain-looking button that fills the rest of the row */
 .food-info {
   flex: 1;
   min-width: 0;
+  min-height: 44px;
+  padding: 10px 4px 10px 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* The food whose editor is open is highlighted a little */
+.editing .food-info .food-name {
+  color: var(--accent);
+}
+
+/* Marker on foods with their own min/max, e.g. "Own limit 50–200 g" */
+.limit-mark {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+/* The small min/max editor under a food */
+.limit-editor {
+  margin: 0 0 12px 44px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+/* Min and max next to each other */
+.limit-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.limit-fields label {
+  margin-top: 8px;
+  font-size: 0.9rem;
+}
+
+.limit-error:empty {
+  display: none;
+}
+
+/* Save and Reset side by side */
+.limit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.limit-actions button.secondary {
+  flex: 1;
+  margin-top: 8px;
 }
 
 .food-name {
@@ -339,6 +409,38 @@ button.primary:disabled {
 /* The badge sits after the food name; let long names wrap */
 .grocery .badge {
   margin-left: 4px;
+}
+
+/* "⚠ 620 g left" under the pack count when more than half a pack is left over */
+.leftover-mark {
+  color: #7a5a00;
+  font-size: 0.8rem;
+}
+
+/* The box listing the large leftovers */
+.leftover-warning {
+  margin-top: 12px;
+}
+
+.leftover-warning ul {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+/* "Copy list" spans the card, so it's easy to hit */
+button.copy-list {
+  width: 100%;
+}
+
+/* Shown only if copying didn't work, so the list can be selected by hand */
+.copy-fallback {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  font: inherit;
+  font-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 /* The selected plan's grocery list sits under the cards on the Plans tab.

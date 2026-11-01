@@ -164,6 +164,8 @@
       threeMidBudget: () => planFor("threeMidBudget", { ...DEFAULTS, budget: 1500 }, foods, true),
       // Only 9 foods ticked: too few for plans 2 and 3
       nineFoods: () => planFor("nineFoods", DEFAULTS, pick(NINE_FOODS), true),
+      // Own min/max per food (test 31), all three plans
+      ownLimits: () => planFor("ownLimits", { ...DEFAULTS, limits: OWN_LIMITS }, foods, true),
     };
 
     // The three plans in display order
@@ -1034,7 +1036,228 @@
           };
         },
       },
+      {
+        title: "Own min and max per food in all three plans",
+        expected:
+          "With own limits (eggs min 100, keso 60–120, tofu max 20, kvarg min 320, rice max 0) every plan keeps every " +
+          "food inside its limits; a min above the realistic max (kvarg 300) raises it, and a max below the 35 g floor " +
+          "(tofu 20) still lets the food in",
+        run() {
+          const plans = scenarios.ownLimits();
+          const checks = [];
+          for (const key of THREE) {
+            const p = plans[key];
+            checks.push([`${p.title}: plan found`, p.status === "optimal"]);
+            if (p.status !== "optimal") continue;
+            for (const [id, limit] of Object.entries(OWN_LIMITS)) {
+              const item = p.items.find((i) => i.id === id);
+              const grams = item ? item.gramsPerDay : 0;
+              const min = limit.min || 0;
+              const max = typeof limit.max === "number" ? limit.max : Infinity;
+              checks.push([
+                `${p.title}: ${id} ${fmt(grams)} g is within ${min}–${max === Infinity ? "default max" : max} g`,
+                grams >= min - EPS && grams <= max + EPS,
+              ]);
+            }
+          }
+          // The two edge cases, checked straight on the model's limits
+          const kvarg = foods.find((f) => f.id === "kvarg");
+          const model = Optimizer.buildModel({ ...DEFAULTS, limits: OWN_LIMITS }, [kvarg], { realistic: true });
+          checks.push([
+            `kvarg min 320 g raises its realistic max (${kvarg.realisticMaxGramsPerDay} g) to ${model.constraints.limit_kvarg.max} g`,
+            model.constraints.limit_kvarg.max === 320,
+          ]);
+          const tofu = foods.find((f) => f.id === "tofu");
+          const tofuModel = Optimizer.buildModel({ ...DEFAULTS, limits: OWN_LIMITS }, [tofu], { realistic: true });
+          checks.push([
+            `tofu max 20 g: its floor in plans 2 and 3 is lowered to 20 g (got ${-tofuModel.variables.use_tofu.floor_tofu} g)`,
+            tofuModel.variables.use_tofu.floor_tofu === -20,
+          ]);
+          return { plan: plans.realistic, checks };
+        },
+      },
+      {
+        title: "Min/max editor in My foods (real index.html)",
+        expected:
+          "Tapping keso opens its editor; min above max shows an error and saves nothing; min 60 / max 120 is saved under " +
+          "pbp.limits, shows a marker and closes the editor; the plans keep keso between 60 and 120 g; Reset removes " +
+          "the limits and the marker; tap targets ≥ 44 px",
+        async run(app) {
+          const page = await pageLimits(app);
+          return {
+            checks: [
+              ["tapping keso opens its editor", page.opened],
+              [`empty fields show the default max as a hint (${page.placeholder})`, page.placeholder === "300"],
+              [`min 150 / max 100: error shown ("${page.badError}")`, page.badError.length > 0],
+              ["…and nothing is saved", !page.badSaved],
+              [`min 60 / max 120 saved under pbp.limits (${JSON.stringify(page.saved)})`,
+                JSON.stringify(page.saved) === JSON.stringify({ keso: { min: 60, max: 120 } })],
+              ["the editor closes after Save", page.closedAfterSave],
+              [`keso shows the marker ("${page.marker}")`, /60–120 g/.test(page.marker)],
+              [`only keso has a marker (${page.markerCount})`, page.markerCount === 1],
+              ["changing the limits marks the plans out of date", page.staleAfterSave],
+              ...THREE.map((key) => [
+                `${key}: keso ${page.kesoGrams[key]} g per day is within 60–120 g`,
+                page.kesoGrams[key] >= 60 - 0.5 && page.kesoGrams[key] <= 120 + 0.5,
+              ]),
+              [`reopening shows the saved values (${page.reopened.join(" / ")})`, page.reopened.join() === "60,120"],
+              ["Reset removes keso from pbp.limits", page.afterReset.saved && !("keso" in page.afterReset.saved)],
+              ["…and the marker", !page.afterReset.marker],
+              [`food button ≥ 44 px (${page.heights.food}), untick area ≥ 44 px (${page.heights.tick})`,
+                page.heights.food >= 44 && page.heights.tick >= 44],
+            ],
+          };
+        },
+      },
+      {
+        title: "Copy list",
+        expected:
+          "The text is grouped by category in foods.json order, one line per food (\"Keso 4% 250 g – 7 packs – 154 kr\", " +
+          "pieces for eggs, no double pack size), then the total cost and protein/kcal per day. The button on the page " +
+          "copies the selected plan and says \"Copied ✓\"",
+        async run(app) {
+          // A hand-made plan, so the exact text can be written out here
+          const fake = {
+            title: "Test plan",
+            items: [
+              { id: "keso", packages: 7, cost: 154, piecesToBuy: null },
+              { id: "eggs", packages: 2, cost: 90, piecesToBuy: 24 },
+              { id: "barebells", packages: 1, cost: 23, piecesToBuy: 1 },
+              { id: "rice", packages: 1, cost: 30, piecesToBuy: null },
+            ],
+            totals: { shoppingCost: 297, budget: 4000, proteinPerDay: 112.4, kcalPerDay: 1690.2 },
+          };
+          const want = [
+            "Test plan – 30 days",
+            "",
+            "Eggs & dairy",
+            "Eggs (12 × 60 g) 720 g – 2 packs (24 pcs) – 90 kr",
+            "Keso 4% 250 g – 7 packs – 154 kr",
+            "",
+            "Grains & bread",
+            "Rice, dry 1,000 g – 1 pack – 30 kr",
+            "",
+            "Snacks & fats",
+            "Barebells bar 55 g – 1 pack – 23 kr",
+            "",
+            "Total: 297 kr (budget 4,000 kr)",
+            "Per day: 112 g protein · 1,690 kcal",
+          ].join("\n");
+          const got = app.copyListText(fake, 30);
+          const firstDiff = got.split("\n").find((line, i) => line !== want.split("\n")[i]);
+
+          // On the page: make the plans with default settings and tap "Copy list" on Cheapest realistic
+          const page = await pageCopy(app);
+          const expected = Optimizer.planAll(DEFAULTS, foods, groups).realistic;
+          const wantPage = app.copyListText(expected, DEFAULTS.days);
+          const lines = page.copied.split("\n");
+          return {
+            checks: [
+              ["hand-made plan gives exactly the expected text" + (firstDiff !== undefined ? ` (first different line: "${firstDiff}")` : ""),
+                got === want],
+              ["the button copies the selected plan (Cheapest realistic)", page.copied === wantPage],
+              [`it starts with the plan's name ("${lines[0]}")`, lines[0] === "Cheapest realistic – 30 days"],
+              [`it ends with the total and the daily protein/kcal ("${lines.slice(-2).join(" | ")}")`,
+                /^Total: [\d,]+ kr \(budget 4,000 kr\)$/.test(lines[lines.length - 2]) &&
+                /^Per day: \d+ g protein · [\d,]+ kcal$/.test(lines[lines.length - 1])],
+              [`the button says "Copied ✓" (got "${page.buttonText}")`, page.buttonText === "Copied ✓"],
+            ],
+            notes: ["Copied text:", ...lines],
+          };
+        },
+      },
+      {
+        title: "Large leftover warning",
+        expected:
+          "Every item is flagged exactly when more than half a pack is left over; on the page the flagged foods " +
+          "(and only those) are listed in the warning and marked in the grocery table",
+        async run(app) {
+          const settings = { ...DEFAULTS, days: 7 };
+          const expected = Optimizer.planAll(settings, foods, groups);
+          const checks = [];
+          let flagged = 0;
+          for (const key of THREE) {
+            const p = expected[key];
+            if (p.status !== "optimal") continue;
+            const wrong = p.items.filter((i) => i.largeLeftover !== (i.leftoverGrams > foodOf(i).packGrams / 2));
+            flagged += p.items.filter((i) => i.largeLeftover).length;
+            checks.push([`${p.title}: flag matches "more than half a pack left"` + (wrong.length ? ` (wrong: ${wrong.map((i) => i.id)})` : ""),
+              wrong.length === 0]);
+          }
+          checks.push([`with 7 days, ${flagged} foods are flagged (so the test checks something)`, flagged > 0]);
+
+          const page = await pageLeftovers(app, settings);
+          for (const key of THREE) {
+            const p = expected[key];
+            const want = p.status === "optimal" ? p.items.filter((i) => i.largeLeftover).map((i) => i.id) : [];
+            const shown = page[key];
+            checks.push(
+              [`${p.title}: warning lists ${shown.warning.join(", ") || "nothing"} (expected ${want.join(", ") || "nothing"})`,
+                shown.warning.join() === want.join()],
+              [`${p.title}: the same foods are marked in the table`, shown.marked.join() === want.join()],
+            );
+          }
+          return { checks };
+        },
+      },
+      {
+        title: "Every failed plan says why and what to change",
+        expected:
+          "Each message of a plan that fails or is over budget tells you what to do (add, raise, lower, use…). " +
+          "Suggested foods come from foods.json, aren't in My foods yet and have the right rating; own limits are named",
+        run() {
+          // An action word: every message must contain at least one
+          const ACTION = /\b(Add|Raise|raise|Lower|lower|use the)\b/;
+          const scenariosToCheck = {
+            "only rice and apples": [Optimizer.plan(DEFAULTS, pick(["rice", "apple"]), foods)],
+            "only Poor/OK foods": [Optimizer.plan(DEFAULTS, pick(POOR_FOUR), foods)],
+            "budget 500": [Optimizer.plan({ ...DEFAULTS, budget: 500 }, foods, foods)],
+            "only 9 foods": Object.values(Optimizer.planAll(DEFAULTS, pick(NINE_FOODS), groups, foods)),
+            "budget 1,300": Object.values(Optimizer.planAll({ ...DEFAULTS, budget: 1300 }, foods, groups, foods)),
+            "budget 1,500": Object.values(Optimizer.planAll({ ...DEFAULTS, budget: 1500 }, foods, groups, foods)),
+            "oil min 200 g": [Optimizer.plan({ ...DEFAULTS, limits: { oil: { min: 200 } } }, foods, foods)],
+            "own max 0 on keso and tuna": [Optimizer.plan({ ...DEFAULTS, limits: { keso: { max: 0 }, ...NO_TUNA } }, pick(TEST9_FOODS), foods)],
+          };
+          const checks = [];
+          const notes = [];
+          for (const [name, plans] of Object.entries(scenariosToCheck)) {
+            const messages = plans.flatMap((p) => p.messages);
+            const silent = messages.filter((m) => !ACTION.test(m));
+            checks.push([`${name}: ${messages.length} message(s), all say what to change` + (silent.length ? ` (not: "${silent[0]}")` : ""),
+              messages.length > 0 && silent.length === 0]);
+            notes.push(...messages.map((m) => `${name}: ${m}`));
+          }
+
+          // The Excellent message suggests real Excellent foods that aren't in My foods
+          const excellent = scenariosToCheck["only Poor/OK foods"][0].problems.find((p) => p.code === "excellent");
+          const named = foods.filter((f) => excellent && excellent.message.includes(f.name));
+          checks.push([`"too few Excellent" suggests foods from foods.json (${named.map((f) => f.id).join(", ")})`,
+            named.length > 0 && named.every((f) => Optimizer.proteinRating(f) === "excellent" && !POOR_FOUR.includes(f.id))]);
+
+          // Own limits are named in the messages
+          const minimums = scenariosToCheck["oil min 200 g"][0];
+          checks.push(["oil min 200 g: says the minimums are too much and names the oil",
+            minimums.status === "infeasible" && minimums.problems.some((p) => p.code === "minimums" && p.message.includes("Rapeseed oil"))]);
+          const ownMax = scenariosToCheck["own max 0 on keso and tuna"][0];
+          checks.push(["own max 0 on keso and tuna: points at your own max limits",
+            ownMax.status === "infeasible" && ownMax.messages.some((m) => /You set your own max for .*Keso/.test(m))]);
+          return { checks, notes };
+        },
+      },
     ];
+
+    // Own limits for test 31: a min, a min and max, a max below the 35 g floor,
+    // a min above the realistic max (kvarg 300 g), and max 0
+    const OWN_LIMITS = {
+      eggs: { min: 100 },
+      keso: { min: 60, max: 120 },
+      tofu: { max: 20 },
+      kvarg: { min: 320 },
+      rice: { max: 0 },
+    };
+
+    // Test 10's foods: only Poor and OK foods
+    const POOR_FOUR = ["peanut_butter", "oats", "lentils_red", "rice"];
 
     // 12 foods for test 29: the 9 foods of test 21 plus three more, so plans 2 and 3 can work too
     const TWELVE_FOODS = [...NINE_FOODS, "oats", "pasta", "veg_frozen"];
@@ -1192,6 +1415,132 @@
         return { myFoods, plans };
       } finally {
         for (const f of foods) app.addFood(f.id);
+      }
+    }
+
+    // Type settings into the hidden page, open Plans and make the three plans (waits until they're drawn)
+    async function pageMakePlans(app, settings) {
+      const doc = app.document;
+      for (const [key, value] of Object.entries(settings)) {
+        const input = doc.getElementById(key);
+        input.value = value;
+        fireIn(app, input, "input");
+      }
+      doc.querySelector('.tab-bar [data-tab="plans"]').click();
+      await app.makeGroceryList();
+    }
+
+    // Test 32 on the real page: open keso's editor, try bad and good values, make plans, reset
+    async function pageLimits(app) {
+      const doc = app.document;
+      const savedLimits = () => JSON.parse(app.localStorage.getItem("pbp.limits") || "null");
+      const foodButton = (id) => doc.querySelector(`#food-list .food-info[data-edit="${id}"]`);
+      const editor = () => doc.getElementById("limit-editor-keso");
+      const field = (key) => editor().querySelector(`[data-limit="${key}"]`);
+      const fill = (min, max) => {
+        field("min").value = min;
+        field("max").value = max;
+      };
+      const markerOf = (id) => {
+        const mark = foodButton(id) && foodButton(id).querySelector(".limit-mark");
+        return mark ? mark.textContent : "";
+      };
+      doc.querySelector('.tab-bar [data-tab="foods"]').click();
+
+      try {
+        // Tap keso: its editor opens under it
+        foodButton("keso").click();
+        const opened = Boolean(editor()) && foodButton("keso").getAttribute("aria-expanded") === "true";
+        const placeholder = field("max").placeholder;
+        const heights = {
+          food: parseFloat(app.getComputedStyle(foodButton("keso")).minHeight),
+          tick: parseFloat(app.getComputedStyle(foodButton("keso").closest(".food").querySelector(".food-tick")).minHeight),
+        };
+
+        // Min above max: an error, nothing saved
+        fill(150, 100);
+        editor().querySelector("[data-limit-save]").click();
+        const badError = editor() ? editor().querySelector(".limit-error").textContent : "";
+        const badSaved = Boolean(savedLimits() && savedLimits().keso);
+
+        // Good values: saved, marker shown, editor closed
+        fill(60, 120);
+        editor().querySelector("[data-limit-save]").click();
+        const saved = savedLimits();
+        const closedAfterSave = editor() === null;
+        const marker = markerOf("keso");
+        const markerCount = doc.querySelectorAll("#food-list .limit-mark").length;
+
+        // Make the plans and read keso's grams per day in each one
+        await pageMakePlans(app, DEFAULTS);
+        const kesoGrams = {};
+        for (const key of THREE) {
+          app.selectPlan(key);
+          const cell = doc.querySelector('#plan-detail tr[data-id="keso"] td:nth-child(2)');
+          kesoGrams[key] = cell ? parseFloat(cell.textContent.replace(/,/g, "")) : 0;
+        }
+
+        // Open the editor again (values are filled in), then Reset
+        doc.querySelector('.tab-bar [data-tab="foods"]').click();
+        foodButton("keso").click();
+        const reopened = [field("min").value, field("max").value];
+        editor().querySelector("[data-limit-reset]").click();
+        const afterReset = { saved: savedLimits(), marker: markerOf("keso") };
+        // The plans were made with the limits, so changing them makes the plans out of date
+        const staleAfterSave = !doc.getElementById("plans-dot").hidden;
+
+        return { opened, placeholder, heights, badError, badSaved, saved, closedAfterSave, marker, markerCount, kesoGrams, reopened, afterReset, staleAfterSave };
+      } finally {
+        app.setFoodLimit("keso", {});
+        app.renderFoods();
+      }
+    }
+
+    // Test 33 on the real page: make the plans, tap "Copy list" and catch what's copied.
+    // The clipboard is replaced by a stand-in, so the test doesn't touch your real clipboard.
+    async function pageCopy(app) {
+      const doc = app.document;
+      let copied = null;
+      Object.defineProperty(app.navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: async (text) => { copied = text; } },
+      });
+      try {
+        await pageMakePlans(app, DEFAULTS);
+        app.selectPlan("realistic");
+        const button = doc.querySelector("#plan-detail [data-copy-list]");
+        button.click();
+        // Wait (up to 3 s) for the button to change its text
+        const started = Date.now();
+        while (button.textContent === "Copy list" && Date.now() - started < 3000) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return { copied: copied || "", buttonText: button.textContent };
+      } finally {
+        // Back to the browser's real clipboard
+        delete app.navigator.clipboard;
+      }
+    }
+
+    // Test 34 on the real page: make the plans for a short period and read the leftover warnings of each plan
+    async function pageLeftovers(app, settings) {
+      const doc = app.document;
+      try {
+        await pageMakePlans(app, settings);
+        const shown = {};
+        for (const key of THREE) {
+          app.selectPlan(key);
+          shown[key] = {
+            warning: [...doc.querySelectorAll("#plan-detail .leftover-warning li[data-id]")].map((li) => li.dataset.id),
+            marked: [...doc.querySelectorAll("#plan-detail tr.large-leftover")].map((tr) => tr.dataset.id),
+          };
+        }
+        return shown;
+      } finally {
+        // Back to the default 30 days
+        const days = doc.getElementById("days");
+        days.value = DEFAULTS.days;
+        fireIn(app, days, "input");
       }
     }
 
@@ -1533,6 +1882,8 @@
       }
       // Start the page tests with every food in My foods, so they see the whole food list
       if (app) for (const f of foods) app.addFood(f.id);
+      // …and with no own min/max on any food (yours are put back afterwards)
+      if (app) for (const f of foods) app.setFoodLimit(f.id, {});
 
       let passed = 0;
       let html = "";

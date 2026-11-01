@@ -74,13 +74,56 @@ const Optimizer = (() => {
   // Max is the user's override if there is one. Otherwise it's maxGramsPerDay
   // from foods.json, or the stricter realisticMaxGramsPerDay (if the food has one)
   // when building a realistic plan.
+  // The user's own limits always win: a min above the default max raises the max
+  // to that min (e.g. tofu min 200 g with plan 2's 150 g default max → max 200 g).
   function limitsFor(f, settings, realistic = false) {
     const override = (settings.limits && settings.limits[f.id]) || {};
     const dataMax =
       realistic && typeof f.realisticMaxGramsPerDay === "number" ? f.realisticMaxGramsPerDay : f.maxGramsPerDay;
     const min = typeof override.min === "number" ? override.min : 0;
-    const max = typeof override.max === "number" ? override.max : dataMax;
+    const max = typeof override.max === "number" ? override.max : Math.max(dataMax, min);
     return { min, max };
+  }
+
+  // The user's own limits ({ id: { min?, max? } }) on foods in this list, as names,
+  // e.g. "Firm tofu and Oats" (only the foods that have a "min" or "max", whichever `which` says)
+  function ownLimitNames(userLimits, foods, which) {
+    const names = foods.filter((f) => userLimits && userLimits[f.id] && typeof userLimits[f.id][which] === "number")
+      .map((f) => f.name);
+    return joinNames(names, "and");
+  }
+
+  // “A”, “A” and “B”, “A”, “B” and “C”, or “A”, “B”, “C” and 2 more (word is "and" or "or").
+  // The quotes keep names with commas readable, e.g. “Soy mince, dry”.
+  function joinNames(names, word) {
+    const quoted = names.map((name) => `“${name}”`);
+    if (quoted.length <= 1) return quoted.join("");
+    if (quoted.length > 3) return `${quoted.slice(0, 3).join(", ")} and ${quoted.length - 3} more`;
+    return `${quoted.slice(0, -1).join(", ")} ${word} ${quoted[quoted.length - 1]}`;
+  }
+
+  // Up to 3 foods from the full food list (catalog) that aren't in My foods yet and
+  // pass the test, cheapest protein first, e.g. "Keso 4%, Kvarg naturell or Firm tofu".
+  // "" if there are none (or no catalog was passed in).
+  function suggestFoods(catalog, foods, test) {
+    const mine = new Set(foods.map((f) => f.id));
+    // kr per gram of protein, so the cheapest protein sources come first
+    const krPerProtein = (f) => (f.proteinPer100g > 0 ? f.packPrice / f.packGrams / f.proteinPer100g : Infinity);
+    const names = (catalog || [])
+      .filter((f) => !mine.has(f.id) && test(f))
+      .sort((a, b) => krPerProtein(a) - krPerProtein(b))
+      .slice(0, 3)
+      .map((f) => f.name);
+    return joinNames(names, "or");
+  }
+
+  // " You set your own max for X and Y in My foods; raising them may help." ("" if there are none)
+  function ownMaxHint(userLimits, foods) {
+    const names = ownLimitNames(userLimits, foods, "max");
+    if (!names) return "";
+    // One food: "it"; several: "them"
+    const pronoun = names.includes("” and “") || names.includes("”, “") ? "them" : "it";
+    return ` You set your own max for ${names} in My foods; raising ${pronoun} may help.`;
   }
 
   // Build the javascript-lp-solver model.
@@ -173,9 +216,10 @@ const Optimizer = (() => {
       //   grams − max · use ≤ 0    (if use = 0, nothing at all)
       // `use` also counts 1 towards the "at least 10 foods" rule.
       // Foods with max 0 can't be used anyway, so they don't need one.
+      // The floor is never above the max, so a user max of e.g. 20 g still lets the food in.
       if (realistic && max > 0) {
         const use = "use_" + f.id;
-        const floor = typeof f.minGramsIfUsed === "number" ? f.minGramsIfUsed : rules.minGramsIfUsed;
+        const floor = Math.min(max, typeof f.minGramsIfUsed === "number" ? f.minGramsIfUsed : rules.minGramsIfUsed);
         v["floor_" + f.id] = 1;
         v["ceiling_" + f.id] = 1;
         variables[use] = { ["floor_" + f.id]: -floor, ["ceiling_" + f.id]: -max, foodCount: 1 };
@@ -277,8 +321,11 @@ const Optimizer = (() => {
         monthlyGrams,
         packages,
         cost,
+        packGrams: f.packGrams,
         // What's left at the end of the period because we rounded up
         leftoverGrams: packages * f.packGrams - monthlyGrams,
+        // More than half a pack left over: worth a warning on the grocery list
+        largeLeftover: packages * f.packGrams - monthlyGrams > f.packGrams / 2,
         // Piece foods (eggs, cans, bars): also give the piece count
         piecesPerDay: f.pieceGrams ? gramsPerDay / f.pieceGrams : null,
         piecesToBuy: f.pieceGrams ? Math.round((packages * f.packGrams) / f.pieceGrams) : null,
@@ -361,13 +408,21 @@ const Optimizer = (() => {
   }
 
   // The plan has no solution: work out why, in words (PLAN.md section 5).
+  // Every message says what to change. help (optional):
+  //   catalog    – every food in foods.json, to suggest foods that aren't in My foods yet
+  //   userLimits – the user's own min/max ({ id: { min?, max? } }), to point at them
   // Returns a list of { code, message, ... }, most useful first.
-  function diagnose(settings, foods) {
+  function diagnose(settings, foods, help = {}) {
     const rules = rulesFrom(settings);
     const kcalTarget = settings.kcal;
     const kcalMin = kcalTarget * rules.kcalLowFactor;
     const problems = [];
     const pct = (share) => Math.round(share * 100);
+    const userLimits = "userLimits" in help ? help.userLimits : settings.limits;
+    const maxHint = ownMaxHint(userLimits, foods);
+    // Foods to suggest, by rating
+    const excellentIdeas = suggestFoods(help.catalog, foods, (f) => proteinRating(f) === "excellent");
+    const notPoorIdeas = suggestFoods(help.catalog, foods, (f) => proteinRating(f) !== "poor");
 
     // Only the foods and their limits, no protein-quality or variety rules
     const basicSkip = ["kcalMin", "protein", "excellent", "poor", "variety"];
@@ -386,7 +441,11 @@ const Optimizer = (() => {
         code: "excellent",
         message:
           `My foods has too few Excellent protein foods to get ${pct(rules.excellentProteinShare)}% ` +
-          `of your protein from them. Add e.g. keso, kvarg, tuna or tofu.`,
+          `of your protein from them. ` +
+          (excellentIdeas
+            ? `Add more Excellent foods like ${excellentIdeas}.`
+            : `Raise the max limits of your Excellent foods.`) +
+          maxHint,
       });
     }
 
@@ -403,8 +462,11 @@ const Optimizer = (() => {
         code: "poor",
         message:
           `Too many of your calories would have to come from Poor protein foods ` +
-          `(at most ${pct(rules.poorKcalShare)}% is allowed). Add more Excellent or OK foods, ` +
-          `or raise their max limits.`,
+          `(at most ${pct(rules.poorKcalShare)}% is allowed). ` +
+          (notPoorIdeas
+            ? `Add Excellent or OK foods like ${notPoorIdeas}, or raise their max limits.`
+            : `Raise the max limits of your Excellent and OK foods.`) +
+          maxHint,
       });
     }
 
@@ -412,9 +474,12 @@ const Optimizer = (() => {
     const maxProtein = bestValue(settings, foods, { optimize: "protein", opType: "max", skip: basicSkip });
     if (maxProtein === null) {
       // Even the minimum amounts the user set are over the calorie target
+      const minNames = ownLimitNames(userLimits, foods, "min");
       problems.push({
         code: "minimums",
-        message: `Your minimum amounts alone are more than ${kcalTarget} kcal. Lower some of the min limits.`,
+        message:
+          `Your minimum amounts alone are more than ${kcalTarget} kcal. ` +
+          `Lower the min limits${minNames ? ` of ${minNames}` : ""} in My foods, or raise your daily calories.`,
       });
     } else if (maxProtein < settings.protein) {
       problems.push({
@@ -422,7 +487,11 @@ const Optimizer = (() => {
         maxProtein,
         message:
           `With these foods you can reach at most ${Math.floor(maxProtein)} g protein within ` +
-          `${kcalTarget} kcal. Add more high-protein foods or raise the max limits.`,
+          `${kcalTarget} kcal. ` +
+          (excellentIdeas
+            ? `Add high-protein foods like ${excellentIdeas}, or raise the max limits.`
+            : `Raise the max limits, or lower your protein target.`) +
+          maxHint,
       });
     }
 
@@ -435,7 +504,7 @@ const Optimizer = (() => {
         maxKcal,
         message:
           `With these foods and max limits you can reach at most ${Math.floor(maxKcal)} kcal a day, ` +
-          `but you need at least ${Math.ceil(kcalMin)}. Add more foods or raise the max limits.`,
+          `but you need at least ${Math.ceil(kcalMin)}. Add more foods or raise the max limits.` + maxHint,
       });
     }
 
@@ -445,7 +514,9 @@ const Optimizer = (() => {
         code: "variety",
         message:
           `No single food may give more than ${pct(rules.varietyKcalShare)}% of your calories. ` +
-          `Add a few more foods so the calories can be spread out.`,
+          `Add a few more foods so the calories can be spread out` +
+          (notPoorIdeas ? `, e.g. ${notPoorIdeas}.` : ".") +
+          maxHint,
       });
     }
 
@@ -455,24 +526,36 @@ const Optimizer = (() => {
         code: "combined",
         message:
           "Each target is reachable on its own, but not all of them at once with these foods. " +
-          "Add more foods or raise some max limits.",
+          (excellentIdeas ? `Add more foods (e.g. ${excellentIdeas}) or raise some max limits.` : "Raise some max limits.") +
+          maxHint,
       });
     }
 
     return problems;
   }
 
+  // What to change when a plan that was found costs more than the budget:
+  // " To fit, raise the budget to at least 1520 kr, lower your protein or calorie target, or try adding … like …"
+  function overBudgetHint(result, foods, catalog) {
+    const ideas = suggestFoods(catalog, foods, (f) => proteinRating(f) === "excellent");
+    const budget = `raise the budget to at least ${Math.round(result.totals.shoppingCost)} kr`;
+    return ideas
+      ? ` To fit, ${budget}, lower your protein or calorie target, or try adding cheap protein foods like ${ideas}.`
+      : ` To fit, ${budget}, or lower your protein or calorie target.`;
+  }
+
   // The whole job: cheapest plan for these settings and ticked foods.
+  // catalog (optional) is every food in foods.json, used to suggest foods in the messages.
   // Returns either
   //   { status: "optimal", items, totals, quality, messages }
   // or
   //   { status: "infeasible", problems, messages }
-  function plan(settings, foods) {
+  function plan(settings, foods, catalog = []) {
     const answer = solve(buildModel(settings, foods));
 
     // No solution: explain why instead of just saying "no solution"
     if (!answer.feasible) {
-      const problems = diagnose(settings, foods);
+      const problems = diagnose(settings, foods, { catalog });
       return { status: "infeasible", problems, messages: problems.map((p) => p.message) };
     }
 
@@ -481,11 +564,12 @@ const Optimizer = (() => {
     result.status = "optimal";
     result.messages = [];
 
-    // Over budget: still show the plan, but say by how much
+    // Over budget: still show the plan, but say by how much and what to change
     if (result.totals.overBudget) {
       result.messages.push(
         `The cheapest plan costs ${Math.round(result.totals.shoppingCost)} kr, ` +
-          `which is ${Math.round(result.totals.overBy)} kr over budget.`
+          `which is ${Math.round(result.totals.overBy)} kr over budget.` +
+          overBudgetHint(result, foods, catalog)
       );
     }
     return result;
@@ -521,16 +605,22 @@ const Optimizer = (() => {
   // Runs the usual checks with that plan's targets (higher protein, realistic max
   // limits, its Excellent share). If none of them is the cause, it's the realistic
   // rules together (floor, 10 foods, group limits).
-  function diagnoseRealistic(setup, foods) {
+  function diagnoseRealistic(setup, foods, catalog = []) {
     const rules = rulesFrom(setup.settings);
     const problems = [];
+    const userLimits = setup.settings.limits;
+    // Any food can help with the food count; cheapest protein first
+    const anyIdeas = suggestFoods(catalog, foods, () => true);
 
-    // Too few foods ticked for the "at least 10 foods" rule
+    // Too few foods ticked for the "at least 10 foods" rule (foods with max 0 don't count)
     const usable = foods.filter((f) => limitsFor(f, setup.settings, true).max > 0).length;
     if (usable < rules.minFoods) {
+      const zeroMax = foods.length > usable ? " Foods you set to max 0 g don't count." : "";
       problems.push({
         code: "minFoods",
-        message: `This plan needs at least ${rules.minFoods} different foods, but only ${usable} are in My foods. Add more foods.`,
+        message:
+          `This plan needs at least ${rules.minFoods} different foods, but only ${usable} are in My foods. ` +
+          `Add ${rules.minFoods - usable} more` + (anyIdeas ? `, e.g. ${anyIdeas}.` : ".") + zeroMax,
       });
     }
 
@@ -542,7 +632,9 @@ const Optimizer = (() => {
     // limits, so only run them when it does. "variety" and "combined" are guesses
     // made without the realistic rules, so leave them out.
     if (!solve(buildModel(checkSettings, foods)).feasible) {
-      problems.push(...diagnose(checkSettings, foods).filter((p) => p.code !== "variety" && p.code !== "combined"));
+      // checkSettings.limits holds every food's realistic limits, so pass the user's own ones separately
+      const found = diagnose(checkSettings, foods, { catalog, userLimits });
+      problems.push(...found.filter((p) => p.code !== "variety" && p.code !== "combined"));
     }
 
     if (problems.length === 0) {
@@ -551,17 +643,19 @@ const Optimizer = (() => {
         message:
           `The realistic rules (at least ${rules.minFoods} different foods, at least ${rules.minGramsIfUsed} g ` +
           `of each food you eat, realistic max amounts and food-group limits) can't all be met with these ` +
-          `foods at ${Math.round(setup.options.proteinMin)} g protein. Add a few more foods.`,
+          `foods at ${Math.round(setup.options.proteinMin)} g protein. ` +
+          `Add a few more foods` + (anyIdeas ? `, e.g. ${anyIdeas}.` : ".") +
+          ownMaxHint(userLimits, foods),
       });
     }
     return problems;
   }
 
   // Plan 2: lowest cost with the realistic rules and the protein buffer
-  function planRealistic(settings, foods, groups) {
+  function planRealistic(settings, foods, groups, catalog = []) {
     const setup = realisticSetup(settings, groups, "realistic");
     const answer = solve(buildModel(setup.settings, foods, setup.options));
-    if (!answer.feasible) return noPlan(diagnoseRealistic(setup, foods));
+    if (!answer.feasible) return noPlan(diagnoseRealistic(setup, foods, catalog));
 
     const result = summarise(settings, foods, gramsFrom(answer, foods));
     result.status = "optimal";
@@ -569,7 +663,8 @@ const Optimizer = (() => {
     if (result.totals.overBudget) {
       result.messages.push(
         `The cheapest realistic plan costs ${Math.round(result.totals.shoppingCost)} kr, ` +
-          `which is ${Math.round(result.totals.overBy)} kr over budget.`
+          `which is ${Math.round(result.totals.overBy)} kr over budget.` +
+          overBudgetHint(result, foods, catalog)
       );
     }
     return result;
@@ -579,7 +674,7 @@ const Optimizer = (() => {
   // least 80% of it from Excellent foods, with the realistic rules. The budget is
   // a ceiling: if the plan costs more, there is no plan (but we say what it would cost).
   // Needs plan 2's answer: if even the cheapest realistic plan doesn't fit, nothing does.
-  function planHighQuality(settings, foods, groups, realistic) {
+  function planHighQuality(settings, foods, groups, realistic, catalog = []) {
     // Plan 2 had no solution: plan 3 can't have one either (same rules, stricter targets)
     if (realistic.status !== "optimal") return noPlan(realistic.problems);
 
@@ -591,7 +686,8 @@ const Optimizer = (() => {
           message:
             `Your budget of ${Math.round(settings.budget)} kr is less than the cheapest realistic plan ` +
             `(${Math.round(realistic.totals.shoppingCost)} kr), so no realistic plan fits. ` +
-            `Raise the budget or add cheaper foods.`,
+            `Raise the budget to at least ${Math.round(realistic.totals.shoppingCost)} kr, or use the ` +
+            `Absolute cheapest plan.`,
         },
       ]);
     }
@@ -600,7 +696,7 @@ const Optimizer = (() => {
 
     // Without the budget ceiling first: does a high quality plan exist at all?
     const unlimited = solve(buildModel(setup.settings, foods, setup.options));
-    if (!unlimited.feasible) return noPlan(diagnoseRealistic(setup, foods));
+    if (!unlimited.feasible) return noPlan(diagnoseRealistic(setup, foods, catalog));
 
     // The solver works per day, so the monthly budget becomes kr per day
     let costMax = settings.budget / settings.days;
@@ -627,7 +723,8 @@ const Optimizer = (() => {
           cost,
           message:
             `The high quality plan costs ${Math.round(cost)} kr, which is ` +
-            `${Math.round(cost - settings.budget)} kr over your budget of ${Math.round(settings.budget)} kr.`,
+            `${Math.round(cost - settings.budget)} kr over your budget of ${Math.round(settings.budget)} kr. ` +
+            `Raise the budget to at least ${Math.round(cost)} kr, or use the Cheapest realistic plan, which fits.`,
         },
       ]);
     }
@@ -642,10 +739,11 @@ const Optimizer = (() => {
   // groups are the food-group limits from data/groups.json (used by plans 2 and 3).
   // Each one is a plan() style answer (items, totals incl. foodCount, quality,
   // messages – or status "infeasible" with problems), plus its key and title.
-  function planAll(settings, foods, groups = []) {
-    const cheapest = plan(settings, foods);
-    const realistic = planRealistic(settings, foods, groups);
-    const highQuality = planHighQuality(settings, foods, groups, realistic);
+  // catalog (optional) is every food in foods.json, so messages can suggest foods to add.
+  function planAll(settings, foods, groups = [], catalog = []) {
+    const cheapest = plan(settings, foods, catalog);
+    const realistic = planRealistic(settings, foods, groups, catalog);
+    const highQuality = planHighQuality(settings, foods, groups, realistic, catalog);
 
     const plans = { cheapest, realistic, highQuality };
     for (const key of Object.keys(plans)) {

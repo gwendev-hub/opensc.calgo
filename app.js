@@ -62,6 +62,15 @@ let myFoods = new Set();
 // Food-group limits from data/groups.json (used by plans 2 and 3), filled in once loaded
 let groups = [];
 
+// Key used to store the user's own min/max per food, e.g. { "keso": { "min": 50, "max": 200 } }
+const LIMITS_KEY = "pbp.limits";
+
+// The user's own min/max grams per day, by food id. A missing min or max means "use the default".
+let foodLimits = {};
+
+// The food whose min/max editor is open in My foods (null = none)
+let editingFood = null;
+
 // The protein rating rule (PLAN.md section 4.1) lives in optimizer.js as
 // Optimizer.proteinRating, so the food list and the optimizer always agree.
 
@@ -145,6 +154,133 @@ function setupMyFoods() {
   }
 }
 
+// ---------- Own min/max per food (PLAN.md section 6, step 6) ----------
+
+// Load the saved limits when the page starts. Keeps only known foods and real numbers ≥ 0.
+function setupLimits() {
+  const saved = loadJson(LIMITS_KEY);
+  const known = new Set(foods.map((f) => f.id));
+  foodLimits = {};
+  if (!saved || typeof saved !== "object") return;
+  for (const [id, limit] of Object.entries(saved)) {
+    if (!known.has(id) || !limit) continue;
+    const clean = {};
+    for (const key of ["min", "max"]) {
+      if (typeof limit[key] === "number" && limit[key] >= 0) clean[key] = limit[key];
+    }
+    if (Object.keys(clean).length) foodLimits[id] = clean;
+  }
+}
+
+// Save the limits to localStorage (the page still works if this fails)
+function saveLimits() {
+  try {
+    localStorage.setItem(LIMITS_KEY, JSON.stringify(foodLimits));
+  } catch (err) {
+    // The limits just won't be remembered next time
+  }
+}
+
+// The user's own limits for one food, e.g. { min: 50 } ({} if none)
+function foodLimitFor(id) {
+  return foodLimits[id] || {};
+}
+
+// Set one food's own limits ({ min?, max? }); an empty object removes them. Saves and marks plans stale.
+function setFoodLimit(id, limit) {
+  if (Object.keys(limit).length) foodLimits[id] = limit;
+  else delete foodLimits[id];
+  saveLimits();
+  markPlansStale();
+}
+
+// The limits the optimizer gets: only those for foods in My foods
+function limitsForMyFoods() {
+  const limits = {};
+  for (const id of myFoods) if (foodLimits[id]) limits[id] = { ...foodLimits[id] };
+  return limits;
+}
+
+// Short text for the marker on a food with own limits, e.g. "50–200 g", "≥ 50 g", "≤ 200 g"
+function limitText(limit) {
+  const hasMin = typeof limit.min === "number";
+  const hasMax = typeof limit.max === "number";
+  if (hasMin && hasMax) return `${limit.min}–${limit.max} g`;
+  if (hasMin) return `≥ ${limit.min} g`;
+  return `≤ ${limit.max} g`;
+}
+
+// Read the two editor fields. Empty = use the default.
+// Returns { limit } if the values are fine, or { error } with a message to show.
+function readLimitFields(minText, maxText) {
+  const limit = {};
+  for (const [key, text] of [["min", minText], ["max", maxText]]) {
+    if (String(text).trim() === "") continue;
+    const value = Number(text);
+    if (!Number.isFinite(value) || value < 0) return { error: "Use grams of 0 or more, or leave it empty." };
+    limit[key] = value;
+  }
+  if (typeof limit.min === "number" && typeof limit.max === "number" && limit.min > limit.max) {
+    return { error: "Min can't be more than max." };
+  }
+  return { limit };
+}
+
+// The small editor under a food in My foods: min and max grams per day, Save and Reset
+function limitEditorHtml(f) {
+  const limit = foodLimitFor(f.id);
+  // Tell the user what "empty" means for this food
+  const realistic = typeof f.realisticMaxGramsPerDay === "number"
+    ? ` (Cheapest realistic and High quality: ${f.realisticMaxGramsPerDay} g)`
+    : "";
+  const value = (key) => (typeof limit[key] === "number" ? limit[key] : "");
+  return `
+    <div class="limit-editor" id="limit-editor-${f.id}">
+      <p class="hint">Grams per day. Leave empty to use the defaults: min 0 g, max ${f.maxGramsPerDay} g${realistic}.</p>
+      <div class="limit-fields">
+        <label>Min g/day
+          <input type="number" inputmode="numeric" min="0" step="5" data-limit="min" value="${value("min")}" placeholder="0">
+        </label>
+        <label>Max g/day
+          <input type="number" inputmode="numeric" min="0" step="5" data-limit="max" value="${value("max")}" placeholder="${f.maxGramsPerDay}">
+        </label>
+      </div>
+      <p class="error limit-error" role="alert"></p>
+      <div class="limit-actions">
+        <button type="button" class="secondary" data-limit-save="${f.id}">Save</button>
+        <button type="button" class="secondary" data-limit-reset="${f.id}">Reset</button>
+      </div>
+    </div>`;
+}
+
+// Open (or close, if it's already open) a food's min/max editor
+function toggleLimitEditor(id) {
+  editingFood = editingFood === id ? null : id;
+  renderFoods();
+}
+
+// Save the open editor's values for one food. Returns false (and shows why) if they aren't valid.
+function saveLimitEditor(id) {
+  const editor = document.getElementById("limit-editor-" + id);
+  const field = (key) => editor.querySelector(`[data-limit="${key}"]`).value;
+  const { limit, error } = readLimitFields(field("min"), field("max"));
+  if (error) {
+    editor.querySelector(".limit-error").textContent = error;
+    return false;
+  }
+  setFoodLimit(id, limit);
+  editingFood = null;
+  renderFoods();
+  return true;
+}
+
+// Reset one food to the default limits
+function resetLimit(id) {
+  setFoodLimit(id, {});
+  editingFood = null;
+  renderFoods();
+}
+
 // Is this food in My foods?
 function isInMyFoods(f) {
   return myFoods.has(f.id);
@@ -212,27 +348,38 @@ const SORTERS = {
   },
 };
 
-// Build the HTML for one row in My foods: a ticked checkbox (untick to remove), name, badges and numbers
+// Build the HTML for one row in My foods: a ticked checkbox (untick to remove), then the food itself
+// as a button (tap to open its min/max editor) with name, badges, own-limit marker and numbers
 function foodRowHtml(f) {
   const rating = Optimizer.proteinRating(f);
   const ratingLabel = RATING_LABELS[rating];
   const lift = liftsOrDilutes(f);
   const kr = krPer100gProtein(f);
   const krText = kr === Infinity ? "no protein" : `${Math.round(kr)} kr / 100 g protein`;
+  const editing = editingFood === f.id;
+  // Small marker on foods with their own min/max
+  const limit = foodLimitFor(f.id);
+  const marker = Object.keys(limit).length
+    ? `<span class="limit-mark" title="Your own min/max per day">Own limit ${limitText(limit)}</span>`
+    : "";
 
   return `
-    <li>
-      <label class="food">
-        <input type="checkbox" data-id="${f.id}" checked>
-        <span class="food-info">
-          <span class="food-name">${f.name}</span><span class="badge ${rating}">${ratingLabel}</span>${nutrientBadgesHtml(f)}<br>
+    <li class="${editing ? "editing" : ""}">
+      <div class="food">
+        <label class="food-tick">
+          <input type="checkbox" data-id="${f.id}" checked>
+          <span class="visually-hidden">Keep ${esc(f.name)} in My foods (untick to remove)</span>
+        </label>
+        <button type="button" class="food-info" data-edit="${f.id}" aria-expanded="${editing}" aria-controls="limit-editor-${f.id}">
+          <span class="food-name">${esc(f.name)}</span><span class="badge ${rating}">${ratingLabel}</span>${nutrientBadgesHtml(f)}${marker}<br>
           <span class="food-stats">
             ${proteinPer100kcal(f).toFixed(1)} g protein / 100 kcal ·
             ${krText} ·
             <span class="${lift}">${lift}</span>
           </span>
-        </span>
-      </label>
+        </button>
+      </div>
+      ${editing ? limitEditorHtml(f) : ""}
     </li>`;
 }
 
@@ -496,6 +643,7 @@ async function loadFoods() {
     [foods, groups] = await Promise.all([fetchJson("data/foods.json"), fetchJson("data/groups.json")]);
     // My foods needs the food list (for the starter set and moving old ticks over)
     setupMyFoods();
+    setupLimits();
     renderFoods();
     // The search box and the button only work once the data is here
     document.getElementById("food-search-input").disabled = false;
@@ -509,8 +657,9 @@ async function loadFoods() {
 
 // ---------- Plans (PLAN.md sections 5 and 6) ----------
 
-// The three plans from the last button press, and which card is selected
+// The three plans from the last button press, the settings they were made with, and which card is selected
 let plans = null;
+let planSettings = null;
 let selectedPlan = "realistic"; // "Cheapest realistic" is selected by default
 
 // Card order on the page
@@ -649,7 +798,7 @@ function macroHtml(plan) {
   const t = plan.totals;
   const kcal = plan.quality.macroKcal;
   const share = plan.quality.macroKcalShare;
-  const days = readSettingsFromForm().days;
+  const days = planSettings.days;
 
   // Daily or monthly amounts (grams and kcal); the % don't change
   const factor = macroPeriod === "month" ? days : 1;
@@ -727,11 +876,13 @@ function groceryTableHtml(plan) {
       const f = foods.find((x) => x.id === i.id);
       // Foods with several pieces per pack (e.g. eggs) also show how many pieces
       const pieces = f.pieceGrams && f.pieceGrams < f.packGrams ? `<br><span class="muted">${i.piecesToBuy} pcs</span>` : "";
+      // More than half a pack left over at the end: a small marker (explained under the table)
+      const leftover = i.largeLeftover ? `<br><span class="leftover-mark">⚠ ${num(i.leftoverGrams)} g left</span>` : "";
       return `
-        <tr>
+        <tr${i.largeLeftover ? ' class="large-leftover"' : ""} data-id="${i.id}">
           <td>${esc(i.name)}<span class="badge ${i.rating}">${RATING_LABELS[i.rating]}</span></td>
           <td class="num">${num(i.gramsPerDay)} g</td>
-          <td class="num">${i.packages}${pieces}</td>
+          <td class="num">${i.packages}${pieces}${leftover}</td>
           <td class="num">${num(i.cost)} kr</td>
         </tr>`;
     })
@@ -743,9 +894,113 @@ function groceryTableHtml(plan) {
       </thead>
       <tbody>${rows}</tbody>
       <tfoot>
-        <tr><th scope="row" colspan="3">Total for ${num(readSettingsFromForm().days)} days</th><td class="num">${num(plan.totals.shoppingCost)} kr</td></tr>
+        <tr><th scope="row" colspan="3">Total for ${num(planSettings.days)} days</th><td class="num">${num(plan.totals.shoppingCost)} kr</td></tr>
       </tfoot>
     </table>`;
+}
+
+// Warning for foods where more than half a pack is left over at the end of the period ("" if none)
+function leftoverWarningHtml(plan) {
+  const big = plan.items.filter((i) => i.largeLeftover);
+  if (big.length === 0) return "";
+  const rows = big
+    .map((i) => `<li data-id="${i.id}">${esc(i.name)}: about ${num(i.leftoverGrams)} g of a ${num(i.packGrams)} g pack</li>`)
+    .join("");
+  return `
+    <div class="warning leftover-warning">
+      <strong>Large leftovers</strong> – more than half a pack left after ${num(planSettings.days)} days:
+      <ul>${rows}</ul>
+      Fine if it keeps; otherwise look for a smaller pack.
+    </div>`;
+}
+
+// The selected plan as plain text for Notes or a message, grouped by category, e.g.
+//   Cheapest realistic – 30 days
+//
+//   Eggs & dairy
+//   Keso 4% 250 g – 7 packs – 154 kr
+//
+//   Total: 1,352 kr (budget 4,000 kr)
+//   Per day: 115 g protein · 1,690 kcal
+function copyListText(plan, days) {
+  const lines = [`${plan.title} – ${num(days)} days`];
+
+  // Group the items by category, in the category order of foods.json
+  const byCategory = new Map();
+  for (const f of foods) {
+    const item = plan.items.find((i) => i.id === f.id);
+    if (!item) continue;
+    if (!byCategory.has(f.category)) byCategory.set(f.category, []);
+    byCategory.get(f.category).push({ f, item });
+  }
+
+  // One line per food: name and pack size, packs (and pieces), cost
+  for (const [category, rows] of byCategory) {
+    lines.push("", category);
+    for (const { f, item } of rows) {
+      // Skip the pack size if the name already says it (e.g. "Barebells bar 55 g")
+      const size = f.name.includes(`${f.packGrams} g`) ? "" : ` ${num(f.packGrams)} g`;
+      const packs = `${item.packages} ${item.packages === 1 ? "pack" : "packs"}`;
+      const pieces = f.pieceGrams && f.pieceGrams < f.packGrams ? ` (${item.piecesToBuy} pcs)` : "";
+      lines.push(`${f.name}${size} – ${packs}${pieces} – ${num(item.cost)} kr`);
+    }
+  }
+
+  // Totals at the bottom
+  const t = plan.totals;
+  lines.push("", `Total: ${num(t.shoppingCost)} kr (budget ${num(t.budget)} kr)`);
+  lines.push(`Per day: ${num(t.proteinPerDay)} g protein · ${num(t.kcalPerDay)} kcal`);
+  return lines.join("\n");
+}
+
+// Copy text to the clipboard. Returns true if it worked.
+async function copyText(text) {
+  // The modern way; only works on https or localhost
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (err) {
+    // Fall through to the old way below
+  }
+  // The old way, e.g. on a phone opening the page over plain http on the home Wi-Fi:
+  // select the text in a hidden text box and run the browser's copy command
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.select();
+  area.setSelectionRange(0, text.length);
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch (err) {
+    ok = false;
+  }
+  area.remove();
+  return ok;
+}
+
+// "Copy list" was tapped: copy the selected plan and say "Copied ✓" for a moment.
+// If copying isn't possible, show the text so it can be selected by hand.
+async function copyList(button) {
+  const text = copyListText(plans[selectedPlan], planSettings.days);
+  const fallback = document.getElementById("copy-fallback");
+  if (await copyText(text)) {
+    button.textContent = "Copied ✓";
+    fallback.hidden = true;
+  } else {
+    button.textContent = "Couldn't copy – select the text below";
+    fallback.value = text;
+    fallback.hidden = false;
+  }
+  // Back to the normal label after 2 seconds (if the list hasn't been redrawn meanwhile)
+  setTimeout(() => {
+    if (button.isConnected) button.textContent = "Copy list";
+  }, 2000);
 }
 
 // Draw the selected plan below the cards: top line, messages, grocery list, protein quality
@@ -769,6 +1024,9 @@ function renderPlanDetail() {
     <p class="top-line"><strong>Total ${costLine(plan)}</strong> · <strong>${num(t.proteinPerDay)} g protein/day</strong> · <strong>${num(t.kcalPerDay)} kcal/day</strong></p>
     ${messages}
     ${groceryTableHtml(plan)}
+    <button type="button" class="secondary copy-list" data-copy-list>Copy list</button>
+    <textarea id="copy-fallback" class="copy-fallback" readonly rows="8" hidden></textarea>
+    ${leftoverWarningHtml(plan)}
     ${proteinQualityHtml(plan)}`;
 }
 
@@ -817,8 +1075,11 @@ async function makeGroceryList() {
   await new Promise((resolve) => setTimeout(resolve, 30));
 
   try {
-    // Only the foods in My foods go to the optimizer
-    plans = Optimizer.planAll(settings, myFoodList(), groups);
+    // Only the foods in My foods go to the optimizer, with their own min/max.
+    // The full food list is passed too, so messages can suggest foods to add.
+    settings.limits = limitsForMyFoods();
+    plans = Optimizer.planAll(settings, myFoodList(), groups, foods);
+    planSettings = settings;
     renderPlans();
   } catch (err) {
     // E.g. the solver couldn't be downloaded (no internet)
@@ -931,6 +1192,23 @@ function init() {
     removeFood(box.dataset.id);
   });
 
+  // My foods: tapping a food opens its min/max editor; Save and Reset work inside the editor
+  document.getElementById("food-list").addEventListener("click", (event) => {
+    const save = event.target.closest("[data-limit-save]");
+    const reset = event.target.closest("[data-limit-reset]");
+    const food = event.target.closest("[data-edit]");
+    if (save) saveLimitEditor(save.dataset.limitSave);
+    else if (reset) resetLimit(reset.dataset.limitReset);
+    else if (food) toggleLimitEditor(food.dataset.edit);
+  });
+
+  // Enter in a min/max field saves, like tapping Save
+  document.getElementById("food-list").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !event.target.dataset.limit) return;
+    event.preventDefault();
+    saveLimitEditor(event.target.closest(".limit-editor").id.replace("limit-editor-", ""));
+  });
+
   // The search box above My foods
   setupSearch();
 
@@ -947,6 +1225,12 @@ function init() {
     if (!card) return;
     selectPlan(card.dataset.key);
     document.getElementById("plan-detail").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  // "Copy list" under the grocery list
+  document.getElementById("plan-detail").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-copy-list]");
+    if (button) copyList(button);
   });
 
   // Macros tab: the plan switcher selects another plan (and stays on Macros);
