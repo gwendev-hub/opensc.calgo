@@ -694,9 +694,10 @@
       {
         title: "Main page: tabs, plan cards and grocery list",
         expected:
-          "Each tab shows only its own panel. With default settings and every food in My foods, the button on the Plans tab " +
-          "shows 3 cards (Cheapest realistic selected); tapping a card selects it and opens the List tab with its grocery " +
-          "list and protein quality (no macros: they have their own tab); the open tab is remembered; changing a setting " +
+          "Four tabs (no separate List tab), each showing only its own panel. With default settings and every food in My foods, " +
+          "the button on the Plans tab shows 3 cards (Cheapest realistic selected) with the selected plan's grocery list and " +
+          "protein quality below them on the same tab (no macros: they have their own tab); tapping a card selects it, shows " +
+          "its list and stays on Plans; the open tab is remembered (an old saved \"list\" tab opens Plans); changing a setting " +
           "shows a dot on Plans and the 'out of date' note",
         async run(app) {
           const page = await pagePlansOnce(app);
@@ -704,7 +705,8 @@
           const rowsOk = (key, rows) => three[key].status === "optimal" && rows === three[key].items.length;
           return {
             checks: [
-              [`tapping each tab shows only its panel: ${page.tabsShown.join(", ")}`, page.tabsShown.join() === "settings,foods,plans,list,macros"],
+              [`tapping each tab shows only its panel: ${page.tabsShown.join(", ")}`, page.tabsShown.join() === "settings,foods,plans,macros"],
+              ["there is no List tab or panel any more", !page.hasListTab],
               ["tab bar buttons are at least 44 px tall", page.tabHeights.every((h) => h >= 44)],
               [`still on the Plans tab after pressing the button (open: ${page.tabAfterRun})`, page.tabAfterRun === "plans"],
               [`cards: ${page.cards.join(", ")}`, page.cards.join() === THREE.join()],
@@ -715,12 +717,14 @@
               ["every row has a rating badge", page.first.badges === page.first.rows],
               [`total shown: ${page.first.total}`, page.first.total === `${Math.round(three.realistic.totals.shoppingCost).toLocaleString("en-GB")} kr`],
               ["protein quality section with coloured bar", page.first.hasQuality],
-              ["the List tab has no macro pie, table or toggle", !page.first.hasMacros && !page.afterTap.hasMacros],
+              ["the grocery list is on the Plans tab, below the cards", page.listUnderCards],
+              ["the Plans tab has no macro pie, table or toggle", !page.first.hasMacros && !page.afterTap.hasMacros],
               [`after tapping Absolute cheapest: "${page.afterTap.heading}", ${page.afterTap.rows} foods`,
                 page.afterTap.heading === "Absolute cheapest" && rowsOk("cheapest", page.afterTap.rows)],
               ["tapped card is now the selected one", page.afterTap.selected === "cheapest"],
-              [`tapping the card opened the List tab (open: ${page.afterTap.tab})`, page.afterTap.tab === "list"],
-              [`open tab remembered in localStorage ("${page.afterTap.savedTab}")`, page.afterTap.savedTab === "list"],
+              [`tapping the card stays on the Plans tab (open: ${page.afterTap.tab})`, page.afterTap.tab === "plans"],
+              [`open tab remembered in localStorage ("${page.afterTap.savedTab}")`, page.afterTap.savedTab === "plans"],
+              [`an old saved "list" tab opens Plans (got "${page.oldListTab}")`, page.oldListTab === "plans"],
               ["no 'out of date' dot before any change", !page.dotBefore],
               ["changing a setting shows the dot on the Plans tab", page.dotAfter],
               ["changing a setting shows the 'out of date' note", page.staleShown],
@@ -875,7 +879,7 @@
       {
         title: "Macros tab: its own tab and a plan switcher",
         expected:
-          "Macros is the fifth tab (after List) with its own icon. A switcher with the three plans sits at the top; tapping a plan " +
+          "Macros is the fourth tab (after Plans) with its own icon. A switcher with the three plans sits at the top; tapping a plan " +
           "shows its macros, stays on the Macros tab, and selects that plan's card and grocery list too",
         async run(app) {
           const page = await pagePlansOnce(app);
@@ -883,7 +887,7 @@
           const whole = (n) => Math.round(n).toLocaleString("en-GB");
           const sw = page.switcher;
           const checks = [
-            [`tab bar order: ${page.tabOrder.join(", ")}`, page.tabOrder.join() === "settings,foods,plans,list,macros"],
+            [`tab bar order: ${page.tabOrder.join(", ")}`, page.tabOrder.join() === "settings,foods,plans,macros"],
             ["Macros tab button has its own icon", page.macrosHasIcon],
             [`switcher buttons: ${sw.buttons.join(", ")}`, sw.buttons.join() === THREE.join()],
             [`switcher labels: ${sw.labels.join(" / ")}`, sw.labels.join() === THREE.map((k) => three[k].title).join()],
@@ -897,7 +901,7 @@
               [`tap ${p.title}: still on the Macros tab (open: ${tap.tab})`, tap.tab === "macros"],
               [`tap ${p.title}: total ${tap.total} kcal (optimizer: ${whole(p.quality.macroKcalTotal)})`, tap.total === whole(p.quality.macroKcalTotal)],
               [`tap ${p.title}: its Plans card is selected too (${tap.card})`, tap.card === tap.key],
-              [`tap ${p.title}: List tab shows it ("${tap.listHeading}")`, tap.listHeading === p.title],
+              [`tap ${p.title}: the grocery list on Plans shows it ("${tap.listHeading}")`, tap.listHeading === p.title],
             );
           }
           return { checks };
@@ -1259,7 +1263,7 @@
           badges: detail.querySelectorAll(".grocery tbody .badge").length,
           total: total ? total.textContent : "",
           hasQuality: Boolean(detail.querySelector(".quality-bar .bar-part")) && /Protein quality/.test(detail.textContent),
-          hasMacros: Boolean(doc.querySelector("#panel-list .macro-pie, #panel-list .macro-table, #panel-list [data-macro-period]")),
+          hasMacros: Boolean(doc.querySelector("#panel-plans .macro-pie, #panel-plans .macro-table, #panel-plans [data-macro-period]")),
         };
       };
       const selectedKey = () => (doc.querySelector('.plan-card[aria-pressed="true"]') || { dataset: {} }).dataset.key;
@@ -1271,7 +1275,7 @@
 
       try {
         // Tap each tab and see which panel is shown
-        const tabsShown = ["settings", "foods", "plans", "list", "macros"].map((name) => {
+        const tabsShown = ["settings", "foods", "plans", "macros"].map((name) => {
           tapTab(name);
           return openTab();
         });
@@ -1279,6 +1283,10 @@
         const tabHeights = [...doc.querySelectorAll(".tab-bar .tab")].map((t) => parseFloat(app.getComputedStyle(t).minHeight));
         const tabOrder = [...doc.querySelectorAll(".tab-bar .tab")].map((t) => t.dataset.tab);
         const macrosHasIcon = Boolean(doc.querySelector('.tab-bar [data-tab="macros"] svg'));
+        const hasListTab = Boolean(doc.querySelector('.tab-bar [data-tab="list"], #panel-list'));
+        // Someone whose last open tab was the old List tab gets Plans
+        app.localStorage.setItem("pbp.tab", "list");
+        const oldListTab = app.loadTab();
 
         // Default settings and every food in My foods, so the page matches scenarios.three()
         setInput("budget", DEFAULTS.budget);
@@ -1299,11 +1307,15 @@
           /kcal\/day/.test(c.textContent) && /protein from Excellent/.test(c.textContent) && /\d+ foods/.test(c.textContent));
         const tabAfterRun = openTab();
         const selectedAtStart = selectedKey();
-        // The List tab is already filled in for the selected plan, even before it's opened
+        // The selected plan's grocery list is filled in under the cards
         const first = readDetail();
+        // The list is inside the Plans panel and comes after the cards
+        const detailEl = doc.getElementById("plan-detail");
+        const listUnderCards = detailEl.closest("#panel-plans") !== null &&
+          Boolean(doc.getElementById("plan-cards").compareDocumentPosition(detailEl) & app.Node.DOCUMENT_POSITION_FOLLOWING);
         const dotBefore = !doc.getElementById("plans-dot").hidden;
 
-        // Tap the "Absolute cheapest" card: it should be selected and the List tab should open
+        // Tap the "Absolute cheapest" card: it should be selected and its list shown, still on Plans
         doc.querySelector('.plan-card[data-key="cheapest"]').click();
         const afterTap = { ...readDetail(), selected: selectedKey(), tab: openTab(), savedTab: app.localStorage.getItem("pbp.tab") };
 
@@ -1361,7 +1373,7 @@
         return {
           tabsShown, tabHeights, tabAfterRun, cards: cards.map((c) => c.dataset.key), cardsHaveStats,
           selectedAtStart, first, afterTap, dotBefore, dotAfter, staleShown, macroDay, macroMonth,
-          tabOrder, macrosHasIcon, switcher,
+          tabOrder, macrosHasIcon, switcher, hasListTab, oldListTab, listUnderCards,
         };
       } finally {
         // Put the user's own saved settings and ticks back

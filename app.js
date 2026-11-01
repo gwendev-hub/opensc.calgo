@@ -772,7 +772,7 @@ function renderPlanDetail() {
     ${proteinQualityHtml(plan)}`;
 }
 
-// Draw the three cards (Plans tab) and the selected plan (List and Macros tabs)
+// Draw the three cards and the selected plan's list (Plans tab), and its macros (Macros tab)
 function renderPlans() {
   document.getElementById("plan-cards").innerHTML = PLAN_ORDER.map((key) => planCardHtml(plans[key])).join("");
   renderPlanDetail();
@@ -780,7 +780,6 @@ function renderPlans() {
   // Swap the "nothing yet" texts for the real content
   document.getElementById("plans-empty").hidden = true;
   document.getElementById("plans").hidden = false;
-  document.getElementById("list-empty").hidden = true;
   document.getElementById("plan-detail").hidden = false;
   document.getElementById("macros-empty").hidden = true;
   document.getElementById("macro-section").hidden = false;
@@ -830,7 +829,7 @@ async function makeGroceryList() {
   }
 }
 
-// Select a plan (from a card or the Macros tab switcher) and redraw the List and Macros tabs
+// Select a plan (from a card or the Macros tab switcher) and redraw its grocery list and macros
 function selectPlan(key) {
   selectedPlan = key;
   // Update the highlighted card without redrawing everything
@@ -856,8 +855,8 @@ function markPlansStale() {
 // Key used to remember the last open tab
 const TAB_KEY = "pbp.tab";
 
-// The five tabs, in the order of the tab bar
-const TABS = ["settings", "foods", "plans", "list", "macros"];
+// The four tabs, in the order of the tab bar
+const TABS = ["settings", "foods", "plans", "macros"];
 
 // Where each tab was scrolled to, so coming back to e.g. Foods keeps your place
 const tabScroll = {};
@@ -869,6 +868,8 @@ let currentTab = null;
 function loadTab() {
   try {
     const saved = localStorage.getItem(TAB_KEY);
+    // The old List tab is now part of Plans
+    if (saved === "list") return "plans";
     return TABS.includes(saved) ? saved : "settings";
   } catch (err) {
     return "settings";
@@ -939,12 +940,13 @@ function init() {
   // "Make my grocery list" runs the optimizer
   document.getElementById("make-list").addEventListener("click", makeGroceryList);
 
-  // A plan card was tapped (one listener for all three cards): select it and open its grocery list
+  // A plan card was tapped (one listener for all three cards): select it and scroll down to its
+  // grocery list under the cards (scroll-margin-top in style.css keeps it clear of the top tab bar)
   document.getElementById("plan-cards").addEventListener("click", (event) => {
     const card = event.target.closest(".plan-card");
     if (!card) return;
     selectPlan(card.dataset.key);
-    showTab("list", { toTop: true });
+    document.getElementById("plan-detail").scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
   // Macros tab: the plan switcher selects another plan (and stays on Macros);

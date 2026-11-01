@@ -341,6 +341,20 @@ button.primary:disabled {
   margin-left: 4px;
 }
 
+/* The selected plan's grocery list sits under the cards on the Plans tab.
+   scroll-margin-top: room above it when a card tap scrolls down to it */
+#plan-detail {
+  margin-top: 16px;
+  scroll-margin-top: 8px;
+}
+
+/* Wide screen: also clear the tab bar fixed at the top */
+@media (min-width: 760px) {
+  #plan-detail {
+    scroll-margin-top: calc(56px + 8px);
+  }
+}
+
 #plan-detail h3 {
   font-size: 1.05rem;
   margin: 20px 0 4px;

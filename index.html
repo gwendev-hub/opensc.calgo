@@ -78,7 +78,7 @@
       </section>
     </div>
 
-    <!-- ===== Tab 3: Plans – the button and the three comparison cards ===== -->
+    <!-- ===== Tab 3: Plans – the button, the three comparison cards, and the selected plan's grocery list ===== -->
     <div id="panel-plans" class="tab-panel" role="tabpanel" aria-labelledby="tab-plans" hidden>
       <!-- The big button that runs the optimizer (enabled once the food data has loaded) -->
       <button type="button" id="make-list" class="primary" disabled>Make my grocery list</button>
@@ -88,25 +88,18 @@
       <!-- Before the first run -->
       <p id="plans-empty" class="hint">Tap the button to make three plans from your settings and My foods.</p>
 
-      <!-- After a run: tap a card to see its grocery list on the List tab -->
+      <!-- After a run: tap a card to see its grocery list below the cards -->
       <section id="plans" aria-labelledby="plans-title" hidden>
         <h2 id="plans-title" class="section-title">Your plans</h2>
         <p class="hint">Tap a plan to see its grocery list.</p>
         <div id="plan-cards" class="plan-cards"></div>
       </section>
-    </div>
 
-    <!-- ===== Tab 4: List – the selected plan's grocery list and protein quality (macros are on tab 5) ===== -->
-    <div id="panel-list" class="tab-panel" role="tabpanel" aria-labelledby="tab-list" hidden>
-      <!-- Before the first run -->
-      <section id="list-empty" class="card">
-        <p class="hint">No list yet. Make your plans on the Plans tab first.</p>
-        <button type="button" class="secondary" data-go-tab="plans">Go to Plans</button>
-      </section>
+      <!-- The selected plan's grocery list and protein quality (macros are on the Macros tab) -->
       <section id="plan-detail" class="card" aria-live="polite" hidden></section>
     </div>
 
-    <!-- ===== Tab 5: Macros – pie, table and ranges for the selected plan, with a plan switcher ===== -->
+    <!-- ===== Tab 4: Macros – pie, table and ranges for the selected plan, with a plan switcher ===== -->
     <div id="panel-macros" class="tab-panel" role="tabpanel" aria-labelledby="tab-macros" hidden>
       <!-- Before the first run -->
       <section id="macros-empty" class="card">
@@ -136,11 +129,6 @@
         <span id="plans-dot" class="tab-dot" hidden><span class="visually-hidden">(out of date)</span></span>
       </span>
       <span class="tab-label">Plans</span>
-    </button>
-    <button type="button" class="tab" id="tab-list" role="tab" aria-controls="panel-list" aria-selected="false" data-tab="list">
-      <!-- Shopping basket icon -->
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9h18l-2 11H5L3 9zM8 9l3-6M16 9l-3-6M9 13v4M15 13v4"/></svg>
-      <span class="tab-label">List</span>
     </button>
     <button type="button" class="tab" id="tab-macros" role="tab" aria-controls="panel-macros" aria-selected="false" data-tab="macros">
       <!-- Pie chart icon -->

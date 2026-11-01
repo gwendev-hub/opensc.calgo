@@ -235,7 +235,7 @@ These don't change the optimizer (yet); they help judge a plan. The rules live i
 The 1 g minimum stops near fat-free foods (e.g. Greek yoghurt 0% with 0.2 g fat) being flagged. There is **no sugar warning** (it flagged milk, fruit and vegetables for their natural sugars, which wasn't useful); `sugarPer100g` stays in the data.
 
 **Per plan** (its own **Macros** tab, section 6):
-- **Plan switcher** at the top: the three plans as small buttons, so you can compare them without going back to Plans. It changes the selected plan everywhere (the Plans card and the List tab follow).
+- **Plan switcher** at the top: the three plans as small buttons, so you can compare them without going back to Plans. It changes the selected plan everywhere (the card and the grocery list on the Plans tab follow).
 - **Pie chart** of protein / carbs / fat / fibre as a share of their energy, drawn with a CSS `conic-gradient`, no chart library.
 - **Table** with grams, kcal and % of kcal for each macro, plus a **total kcal** row:
   - protein × 4, carbs × 4, fat × 9, fibre × 2 kcal per gram
@@ -313,9 +313,9 @@ Switch the variables to **whole packages per month**, using integer variables in
 
 ## 6. Screens (one page, mobile-first)
 
-Still one `index.html`, split into **five tabs**. Switching tabs only shows one section and hides the others (plain JavaScript, no page loads). The last open tab is remembered in `localStorage` (wrapped in try/catch), and each tab keeps its own scroll position while the page is open.
+Still one `index.html`, split into **four tabs**. Switching tabs only shows one section and hides the others (plain JavaScript, no page loads). The last open tab is remembered in `localStorage` (wrapped in try/catch), and each tab keeps its own scroll position while the page is open.
 
-**Tab bar:** fixed to the bottom of the screen on a phone, like a phone app: five buttons with an icon and a short label, at least 44 px tall (60 px), with room for the iPhone home indicator. On a wide screen (760 px and up) it sits at the top instead, with icon and label side by side. The open tab is green and bold.
+**Tab bar:** fixed to the bottom of the screen on a phone, like a phone app: four buttons with an icon and a short label, at least 44 px tall (60 px), with room for the iPhone home indicator. On a wide screen (760 px and up) it sits at the top instead, with icon and label side by side. The open tab is green and bold.
 
 1. **Settings tab:** budget, kcal, protein, days. Large inputs with sensible defaults (4,000 kr, 1,700 kcal, 110 g, 30 days).
 2. **Foods tab:**
@@ -325,24 +325,25 @@ Still one `index.html`, split into **five tabs**. Switching tabs only shows one 
    - **My foods (N):** only the foods you've added, grouped by category and sorted with the "Sort by" choice. Each food has a ticked checkbox (untick = remove it from My foods; the whole row is the tap target, ≥ 44 px), its rating badge (green, yellow or red), small fibre and ⚠ sat. fat badges (section 4.5), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. If it's empty, a hint says to search to add foods. Tapping a food opens its min/max fields (advanced, hidden by default; step 6).
    - **The optimizer uses only My foods.**
    - **Saved:** the ids are kept in `localStorage` under `pbp.myFoods` (a list, wrapped in try/catch). On the **first visit** (nothing saved) My foods is the starter set (`"starter": true`). **Moving old users over:** if only the old `pbp.ticks` is saved (`{ id: false }` for unticked foods, everything else counted as ticked), My foods becomes every food that wasn't unticked, and `pbp.ticks` is removed once My foods is saved. A saved empty list stays empty. Ids no longer in `foods.json` are dropped.
-3. **Plans tab:**
+3. **Plans tab** (plans and the grocery list together on one page; there is no separate List tab any more):
    - The **"Make my grocery list"** button, which runs `Optimizer.planAll`. Before the first run, a short hint says what it does.
    - **Three comparison cards** (section 5, "Three plans"), side by side on a wide screen and stacked on a phone: *Absolute cheapest*, *Cheapest realistic* (selected by default), *High quality*. Each card shows total cost vs the budget, protein and kcal per day, % of protein from Excellent foods and the number of foods, or "Not possible".
-   - **Tapping a card selects it and opens the List tab.**
+   - **Tapping a card selects it and scrolls down to its grocery list**, below the cards on the same tab.
    - **Out of date:** if settings or My foods change after plans were made, a small red dot appears on the Plans tab button and an "out of date" note appears above the cards, until the button is pressed again.
-4. **List tab** (grocery list and protein quality only, for the selected plan; before the first run it says to make plans first, with a "Go to Plans" button):
-   - Top line: **Total 3,420 kr of 4,000 kr ✔** · **112 g protein/day** · **1,690 kcal/day**
-   - Messages, e.g. over budget, or why the plan isn't possible
-   - Grocery table: food, rating badge, amount per day, packages, cost, and a total
-   - **Protein quality** section (section 4.4)
-   - A "Copy list" button that copies plain text to paste into Notes or a message (step 6)
-   - Warnings such as large leftovers (step 5)
-5. **Macros tab** (for the selected plan; before the first run it says to make plans first, with a "Go to Plans" button). Pie-chart icon. See section 4.5:
+   - **Grocery list of the selected plan** (below the cards, only after the first run; no macros, they have their own tab):
+     - Top line: **Total 3,420 kr of 4,000 kr ✔** · **112 g protein/day** · **1,690 kcal/day**
+     - Messages, e.g. over budget, or why the plan isn't possible
+     - Grocery table: food, rating badge, amount per day, packages, cost, and a total
+     - **Protein quality** section (section 4.4)
+     - A "Copy list" button that copies plain text to paste into Notes or a message (step 6)
+     - Warnings such as large leftovers (step 5)
+   - A last open tab saved as `"list"` (from before the merge) opens Plans.
+4. **Macros tab** (for the selected plan; before the first run it says to make plans first, with a "Go to Plans" button). Pie-chart icon. See section 4.5:
    - Plan switcher with the three plans at the top (tapping one stays on Macros)
    - Daily / Monthly toggle
    - Pie chart and the table: grams, kcal and % of kcal for protein (×4), carbs (×4), fat (×9) and fibre (×2), plus a total kcal row
    - The fibre / fat / carbs range rows
-6. **Footer:** where the prices come from and their date, a "not medical advice" note, and a feedback link (on every tab, above the tab bar).
+5. **Footer:** where the prices come from and their date, a "not medical advice" note, and a feedback link (on every tab, above the tab bar).
 
 ---
 
@@ -391,11 +392,11 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 19 | Food-group limits | In plans 2 and 3: dairy ≤ 700 g/day; rice + pasta + bulgur + oats ≤ 200 g dry/day; every group in `groups.json` has members |
 | 20 | Budget 1,500 kr (between plan 2 and plan 3) | Plans 1 and 2 fit; plan 3 has no plan and says what it would cost and how far over budget |
 | 21 | Only 9 foods ticked | Plan 1 still works; plans 2 and 3 say they need at least 10 different foods (and nothing misleading) |
-| 22 | Main page with tabs (real `index.html`) | Each tab shows only its panel; tab buttons ≥ 44 px; the button on Plans shows 3 cards with Cheapest realistic selected; tapping a card selects it and opens List with its grocery list and protein quality; the List tab has no macros; the open tab is remembered; a change shows the dot on Plans and the "out of date" note |
+| 22 | Main page with tabs (real `index.html`) | Each tab shows only its panel; tab buttons ≥ 44 px; the button on Plans shows 3 cards with Cheapest realistic selected; the selected plan's grocery list and protein quality are below the cards on the same tab (no List tab or panel); tapping a card selects it, shows its list and stays on Plans; the Plans tab has no macros; the open tab is remembered, and an old saved "list" tab opens Plans; a change shows the dot on Plans and the "out of date" note |
 | 23 | Nutrients add up | Every food has the 5 nutrient fields, saturated fat ≤ fat, sugar ≤ carbs, and kcal ≈ 4P + 4C + 9F + 2 fibre within 15% (failures are listed) |
 | 24 | Fibre ratings and warnings | e.g. lentils, oats, chickpeas, Oumph, bread = High fibre; pasta, frozen veg, Quest chips = Source; rice, keso, tuna = Low; prästost, keso, Barebells, milk = ⚠ sat. fat; Greek yoghurt 0% has no sat. fat warning; no food gets a sugar warning and the page never shows "⚠ Sugar" (sugarPer100g still in the data); the Foods tab badges match |
 | 25 | Macro view (real `index.html`, Macros tab) | Pie drawn with a conic gradient (4 slices); table rows protein, carbs, fat, fibre with grams matching the optimizer, kcal = grams × 4 / 4 / 9 / 2, % of kcal adding up to 100, and a total kcal row; Monthly shows grams and kcal × days with the same %; fibre / fat / carbs rows are green or yellow as expected |
-| 26 | Macros tab and plan switcher (real `index.html`) | Macros is the fifth tab, after List, with its own icon; the switcher shows the three plans (≥ 44 px), starts on the selected plan, and tapping a plan shows its total kcal, stays on Macros, and selects its Plans card and List |
+| 26 | Macros tab and plan switcher (real `index.html`) | Macros is the fourth tab, after Plans, with its own icon; the switcher shows the three plans (≥ 44 px), starts on the selected plan, and tapping a plan shows its total kcal, stays on Macros, and selects its Plans card and grocery list |
 | 27 | Food search (`searchFoods` + real `index.html`) | Finds by alias (tonfisk → both tuna products, lax → salmon), without accents (hono → Hönökaka, agg → eggs, prast → prästost, jordnotssmor → peanut butter), case-insensitive, two words in a row (cottage ch → keso); "ice" and "una" find nothing; every food has ≥ 2 aliases. On the page: focus opens the list with every food, its category and the right protein badge; typing "tonfisk" filters live; Escape and a tap outside close it, a tap inside doesn't; input and rows ≥ 44 px |
 | 28 | Adding and removing (real `index.html`) | Unticking keso removes it from My foods, the saved list and what the optimizer gets; searching "cottage" and tapping keso adds it back under its category, saves it and shows ✓; tapping it again changes nothing; the row (untick control) ≥ 44 px |
 | 29 | The optimizer uses only My foods (real `index.html`) | With 12 foods in My foods, the button makes the same three plans (foods and totals) as `Optimizer.planAll` with only those 12, and no grocery list has any other food |
