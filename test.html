@@ -108,14 +108,14 @@
     const EPS = 1e-6;
 
     // Default settings from PLAN.md section 6
-    const DEFAULTS = { budget: 4000, kcal: 1700, protein: 110, days: 30 };
+    const DEFAULTS = { budget: 4000, kcal: 1700, proteinPct: 30, carbsPct: 45, fatPct: 25, tolerancePct: 10, days: 30 };
 
     // "Tuna" in the plan means both tuna products in foods.json
     const TUNA = ["tuna_can", "tuna_frozen"];
     const NO_TUNA = { tuna_can: { max: 0 }, tuna_frozen: { max: 0 } };
 
     // Foods from test 9: calorie-dense foods plus keso and tuna
-    const TEST9_FOODS = ["peanut_butter", "oats", "lentils_red", "rice", "keso", ...TUNA];
+    const TEST9_FOODS = ["peanut_butter", "oil", "oats", "lentils_red", "rice", "keso", ...TUNA];
 
     // All foods from data/foods.json and the food-group limits from data/groups.json (loaded below)
     let foods = [];
@@ -147,7 +147,7 @@
       test9: () => planFor("test9", DEFAULTS, pick(TEST9_FOODS)),
       // Same foods with the quality rules switched off, to show what the rules change
       test9NoRules: () =>
-        planFor("test9NoRules", { ...DEFAULTS, rules: { excellentProteinShare: 0, poorKcalShare: 1 } }, pick(TEST9_FOODS)),
+        planFor("test9NoRules", { ...DEFAULTS, rules: { excellentProteinShare: 0 } }, pick(TEST9_FOODS)),
       poorOnly: () => planFor("poorOnly", DEFAULTS, pick(["peanut_butter", "oats", "lentils_red", "rice"])),
       // Stress case for the variety cap: quality rules off and every max × 10,
       // so one cheap food would take over if the 35% cap didn't stop it
@@ -161,7 +161,7 @@
       // Budget below the cheapest realistic plan, so plan 3 can't exist
       threeLowBudget: () => planFor("threeLowBudget", { ...DEFAULTS, budget: LOW_BUDGET }, foods, true),
       // Budget between plan 2 and plan 3, so only the high quality plan is over budget
-      threeMidBudget: () => planFor("threeMidBudget", { ...DEFAULTS, budget: 1500 }, foods, true),
+      threeMidBudget: () => planFor("threeMidBudget", { ...DEFAULTS, budget: MID_BUDGET }, foods, true),
       // Only 9 foods ticked: too few for plans 2 and 3
       nineFoods: () => planFor("nineFoods", DEFAULTS, pick(NINE_FOODS), true),
       // Own min/max per food (test 31), all three plans
@@ -173,24 +173,44 @@
 
     // Settings for test 36: 7 days (big packs are coarse steps), and 14 days with high targets
     const PACKS_WEEK = { ...DEFAULTS, days: 7 };
-    const PACKS_HIGH = { budget: 4000, kcal: 2400, protein: 160, days: 14 };
+    const PACKS_HIGH = { ...DEFAULTS, kcal: 2400, proteinPct: 26.7, carbsPct: 48.3, fatPct: 25, days: 14 };
 
     // The three plans in display order
     const THREE = ["cheapest", "realistic", "highQuality"];
 
-    // Test 17's budget: below the cheapest realistic plan (about 1,270 kr in whole packages)
-    const LOW_BUDGET = 1250;
+    // Test 17's budget: below the cheapest realistic plan (about 1,170 kr in whole packages)
+    const LOW_BUDGET = 1150;
+    // Test 20's budget: between the cheapest realistic plan and the higher quality plan (about 1,550 kr)
+    const MID_BUDGET = 1400;
 
     // 9 foods that easily meet the targets in plan 1, but are one short of plans 2 and 3's 10
     const NINE_FOODS = ["tuna_can", "cod_frozen", "eggs", "keso", "kvarg", "greek_0", "tofu", "lentils_red", "rice"];
 
-    // Protein minimum and Excellent share each plan must meet with default settings
+    // Excellent share each plan must meet
     const RULES = Optimizer.DEFAULT_RULES;
     const PLAN_TARGETS = {
-      cheapest: { protein: DEFAULTS.protein, excellent: RULES.excellentProteinShare },
-      realistic: { protein: DEFAULTS.protein + RULES.proteinBuffer, excellent: RULES.excellentProteinShare },
-      highQuality: { protein: DEFAULTS.protein + RULES.highQualityProteinExtra, excellent: RULES.highQualityExcellentShare },
+      cheapest: { excellent: RULES.excellentProteinShare },
+      realistic: { excellent: RULES.excellentProteinShare },
+      highQuality: { excellent: RULES.highQualityExcellentShare },
     };
+
+    // Grams a plan reached for each macro
+    const macroGrams = (plan) => ({ protein: plan.totals.proteinPerDay, carbs: plan.totals.carbsPerDay, fat: plan.totals.fatPerDay });
+
+    // One check per macro and one for calories: is this plan inside its goal ± tolerance?
+    function macroChecks(name, plan, settings) {
+      if (plan.status !== "optimal") return [[`${name}: no plan (${plan.messages.join(" ")})`, false]];
+      const goals = Optimizer.macroGoals(settings);
+      const grams = macroGrams(plan);
+      const checks = Object.keys(goals).map((m) => [
+        `${name}: ${m} ${fmt(grams[m], 1)} g within ${fmt(goals[m].min, 1)}–${fmt(goals[m].max, 1)}`,
+        grams[m] >= goals[m].min - EPS && grams[m] <= goals[m].max + EPS,
+      ]);
+      const kcal = plan.totals.kcalPerDay;
+      checks.push([`${name}: ${fmt(kcal)} kcal within 95–100% of ${settings.kcal}`,
+        kcal >= settings.kcal * 0.95 - EPS && kcal <= settings.kcal + EPS]);
+      return checks;
+    }
 
     // The food from foods.json for one item in a plan
     const foodOf = (item) => foods.find((f) => f.id === item.id);
@@ -203,7 +223,7 @@
     function stressSettings(extraRules = {}) {
       const limits = {};
       for (const f of foods) limits[f.id] = { max: f.maxGramsPerDay * 10 };
-      return { ...DEFAULTS, limits, rules: { excellentProteinShare: 0, poorKcalShare: 1, ...extraRules } };
+      return { ...DEFAULTS, limits, rules: { excellentProteinShare: 0, ...extraRules } };
     }
 
     // The largest share of the plan's calories that a single food gives (0–1)
@@ -232,7 +252,7 @@
     const TESTS = [
       {
         title: "Default settings, all foods ticked",
-        expected: "Solution found, protein ≥ 110, kcal between 1,615 and 1,700, cost ≤ 4,000",
+        expected: "Solution found, protein, carbs and fat within goal ± 10%, kcal between 1,615 and 1,700, cost ≤ 4,000",
         run() {
           const plan = scenarios.defaults();
           const t = plan.totals || {};
@@ -240,7 +260,7 @@
             plan,
             checks: [
               ["solution found", plan.status === "optimal"],
-              [`protein ≥ 110 g (got ${fmt(t.proteinPerDay || 0, 1)})`, t.proteinPerDay >= 110 - EPS],
+              ...macroChecks("plan", plan, DEFAULTS),
               [
                 `kcal between 1,615 and 1,700 (got ${fmt(t.kcalPerDay || 0)})`,
                 t.kcalPerDay >= 1615 - EPS && t.kcalPerDay <= 1700 + EPS,
@@ -251,20 +271,20 @@
         },
       },
       {
-        title: "Only rice and apples ticked, protein 110",
+        title: "Only rice and apples ticked, default macro goals",
         expected: "Infeasible, with a message giving the maximum protein reachable",
         run() {
           const plan = scenarios.riceApples();
           const problem = (plan.problems || []).find((p) => p.code === "protein");
-          const maxText = problem ? String(Math.floor(problem.maxProtein)) : "";
+          const maxText = problem ? String(Math.floor(problem.value)) : "";
           return {
             plan,
             checks: [
               ["infeasible", plan.status === "infeasible"],
-              ["has a 'max protein reachable' message", Boolean(problem)],
+              ["has a 'protein can't reach' message", Boolean(problem) && problem.message.startsWith("Protein can't reach 115 g")],
               [
                 `message shows the maximum protein (${maxText || "?"} g)`,
-                Boolean(problem) && problem.message.includes(maxText + " g protein"),
+                Boolean(problem) && problem.message.includes(`at most ${maxText} g`),
               ],
             ],
           };
@@ -417,7 +437,7 @@
       },
       {
         title: "Calorie-dense foods + keso and tuna",
-        expected: "≥ 60% of protein from Excellent foods; Poor foods ≤ 40% of kcal",
+        expected: "≥ 60% of protein from Excellent foods, macros within their ranges",
         run() {
           const plan = scenarios.test9();
           const q = plan.quality;
@@ -425,7 +445,7 @@
           const notes = noRules.status === "optimal"
             ? [
                 `Without the quality rules, the same foods give only ${pct(noRules.quality.proteinShare.excellent)} ` +
-                  `of protein from Excellent foods and ${pct(noRules.quality.kcalShare.poor)} of kcal from Poor foods.`,
+                  `of protein from Excellent foods.`,
               ]
             : [];
           return {
@@ -433,7 +453,7 @@
             checks: [
               ["solution found", plan.status === "optimal"],
               [`≥ 60% of protein from Excellent (got ${q ? pct(q.proteinShare.excellent) : "–"})`, Boolean(q) && q.proteinShare.excellent >= 0.6 - EPS],
-              [`Poor foods ≤ 40% of kcal (got ${q ? pct(q.kcalShare.poor) : "–"})`, Boolean(q) && q.kcalShare.poor <= 0.4 + EPS],
+              ...macroChecks("plan", plan, DEFAULTS),
             ],
             notes,
           };
@@ -459,7 +479,7 @@
         title: "Lifts/dilutes and target density (app.js)",
         expected:
           "Fixed 10 g / 100 kcal: keso and tuna lift; eggs, lentils, chickpeas, oats dilute. " +
-          "110 g / 1,700 kcal → 6.5; protein 150 changes only the info line",
+          "30% of 1,700 kcal → 7.5; protein 40% changes only the info line",
         async run(app) {
           const checks = [];
           const byId = (id) => foods.find((f) => f.id === id);
@@ -473,13 +493,13 @@
             checks.push([`${id} dilutes (got "${got}")`, got.startsWith("dilutes")]);
           }
           // Target density, as a pure calculation
-          const d110 = app.targetDensity({ protein: 110, kcal: 1700 }).toFixed(1);
-          checks.push([`target density 110 / 1,700 = 6.5 (got ${d110})`, d110 === "6.5"]);
+          const density = app.targetDensity(DEFAULTS).toFixed(1);
+          checks.push([`target density 30% of 1,700 kcal = 7.5 (got ${density})`, density === "7.5"]);
 
-          // On the real page: change protein from 110 to 150 and see what changes
-          const page = await pageChange(app, 150);
-          checks.push([`info line: ${page.before.info} → ${page.after.info} (expected 6.5 → 8.8)`,
-            page.before.info === "6.5" && page.after.info === "8.8"]);
+          // On the real page: change protein from 30% to 40% and see what changes
+          const page = await pageChange(app, 40);
+          checks.push([`info line: ${page.before.info} → ${page.after.info} (expected 7.5 → 10.0)`,
+            page.before.info === "7.5" && page.after.info === "10.0"]);
           checks.push([`no food label changed (${page.after.labels.length} labels compared)`,
             page.after.labels.length > 0 && page.after.labels.join() === page.before.labels.join()]);
           return { checks };
@@ -488,8 +508,8 @@
       {
         title: "Three plans, default settings",
         expected:
-          "All three give valid plans: kcal 1,615–1,700; protein ≥ 110 / 115 / 130; " +
-          "≥ 60% / 60% / 80% of protein from Excellent; Poor ≤ 40% of kcal",
+          "All three give valid plans: kcal 1,615–1,700; protein, carbs and fat within goal ± 10%; " +
+          "≥ 60% / 60% / 80% of protein from Excellent",
         run() {
           const plans = scenarios.three();
           const checks = [];
@@ -503,12 +523,11 @@
             const t = p.totals;
             const target = PLAN_TARGETS[key];
             checks.push([`${name}: kcal ${fmt(t.kcalPerDay)} within 1,615–1,700`, t.kcalPerDay >= 1615 - EPS && t.kcalPerDay <= 1700 + EPS]);
-            checks.push([`${name}: protein ${fmt(t.proteinPerDay, 1)} ≥ ${target.protein}`, t.proteinPerDay >= target.protein - EPS]);
+            checks.push(...macroChecks(name, p, DEFAULTS));
             checks.push([
               `${name}: ${pct(p.quality.proteinShare.excellent)} of protein from Excellent (≥ ${pct(target.excellent, 0)})`,
               p.quality.proteinShare.excellent >= target.excellent - EPS,
             ]);
-            checks.push([`${name}: ${pct(p.quality.kcalShare.poor)} of kcal from Poor (≤ 40%)`, p.quality.kcalShare.poor <= 0.4 + EPS]);
             checks.push([`${name}: food count ${t.foodCount} matches the list`, t.foodCount === p.items.length && t.foodCount > 0]);
           }
           return { checks };
@@ -596,8 +615,8 @@
         },
       },
       {
-        title: "Protein targets of plans 2 and 3",
-        expected: "Plan 2 protein ≥ 110 + 5 = 115 g; plan 3 protein ≥ 110 + 20 = 130 g with ≥ 80% from Excellent foods",
+        title: "Protein in plans 2 and 3",
+        expected: "Both within the same range, 115–140 g (no extra grams on top of the goal); plan 3 with ≥ 80% from Excellent foods",
         run() {
           const p2 = scenarios.realistic();
           const p3 = scenarios.highQuality();
@@ -607,15 +626,15 @@
           return {
             plan: p3,
             checks: [
-              [`Cheapest realistic: ${fmt(g2, 1)} g ≥ 115`, g2 >= 115 - EPS],
-              [`High quality: ${fmt(g3, 1)} g ≥ 130`, g3 >= 130 - EPS],
-              [`High quality: ${pct(e3)} of protein from Excellent (≥ 80%)`, e3 >= 0.8 - EPS],
+              [`Cheapest realistic: ${fmt(g2, 1)} g within 114.75–140.25`, g2 >= 114.75 - EPS && g2 <= 140.25 + EPS],
+              [`Higher quality: ${fmt(g3, 1)} g within 114.75–140.25`, g3 >= 114.75 - EPS && g3 <= 140.25 + EPS],
+              [`Higher quality: ${pct(e3)} of protein from Excellent (≥ 80%)`, e3 >= 0.8 - EPS],
             ],
           };
         },
       },
       {
-        title: "Budget 1,250 kr: below the cheapest realistic plan",
+        title: "Budget 1,150 kr: below the cheapest realistic plan",
         expected: "Plan 2 is shown with an over-budget message; plan 3 explains that no realistic plan fits",
         run() {
           const plans = scenarios.threeLowBudget();
@@ -674,7 +693,7 @@
         },
       },
       {
-        title: "Budget 1,500 kr: high quality plan over budget",
+        title: "Budget 1,400 kr: higher quality plan over budget",
         expected: "Plans 1 and 2 fit; plan 3 has no plan and says what it would cost and how far over budget",
         run() {
           const plans = scenarios.threeMidBudget();
@@ -688,7 +707,7 @@
               ["High quality: no plan", p3.status === "infeasible"],
               [
                 `High quality: says it would cost ${problem ? fmt(problem.cost) : "?"} kr, over the budget`,
-                Boolean(problem) && problem.cost > 1500 && problem.message.includes(`costs ${fmt(problem.cost)} kr`),
+                Boolean(problem) && problem.cost > MID_BUDGET && problem.message.includes(`costs ${fmt(problem.cost)} kr`),
               ],
             ],
           };
@@ -834,7 +853,7 @@
         expected:
           "Pie of protein / carbs / fat / fibre (% of kcal, adds up to 100%); a table with grams, kcal (protein ×4, carbs ×4, " +
           "fat ×9, fibre ×2) and % of kcal, plus a total kcal row; the Monthly toggle shows grams and kcal × days; " +
-          "fibre vs 25–35 g, fat vs 25–40% and carbs vs 45–60% are green inside and yellow outside the range",
+          "fibre vs 25–35 g is green inside and yellow outside the range",
         async run(app) {
           const page = await pagePlansOnce(app);
           const plan = scenarios.three().cheapest; // the Macros tab shows this plan after the card tap
@@ -864,8 +883,6 @@
           const inside = (v, lo, hi) => v >= lo && v <= hi;
           const expectedRanges = [
             ["Fibre", inside(t.fiberPerDay, 25, 35)],
-            ["Fat", inside(share.fat, 0.25, 0.4)],
-            ["Carbs", inside(share.carbs, 0.45, 0.6)],
           ];
           const shownRanges = day.ranges.map((r) => [r.name, r.inRange]);
           const shareSum = share.protein + share.carbs + share.fat + share.fiber;
@@ -1242,8 +1259,8 @@
             "only Poor/OK foods": [Optimizer.plan(DEFAULTS, pick(POOR_FOUR), foods)],
             "budget 500": [Optimizer.plan({ ...DEFAULTS, budget: 500 }, foods, foods)],
             "only 9 foods": Object.values(Optimizer.planAll(DEFAULTS, pick(NINE_FOODS), groups, foods)),
-            "budget 1,250": Object.values(Optimizer.planAll({ ...DEFAULTS, budget: LOW_BUDGET }, foods, groups, foods)),
-            "budget 1,500": Object.values(Optimizer.planAll({ ...DEFAULTS, budget: 1500 }, foods, groups, foods)),
+            "budget 1,150": Object.values(Optimizer.planAll({ ...DEFAULTS, budget: LOW_BUDGET }, foods, groups, foods)),
+            "budget 1,400": Object.values(Optimizer.planAll({ ...DEFAULTS, budget: MID_BUDGET }, foods, groups, foods)),
             "oil min 200 g": [Optimizer.plan({ ...DEFAULTS, limits: { oil: { min: 200 } } }, foods, foods)],
             "own max 0 on keso and tuna": [Optimizer.plan({ ...DEFAULTS, limits: { keso: { max: 0 }, ...NO_TUNA } }, pick(TEST9_FOODS), foods)],
           };
@@ -1329,6 +1346,223 @@
           return { checks, notes: ["Open test.html on the phone to check the phone's own speed."] };
         },
       },
+      {
+        title: "1,700 kcal, 30/45/25: all macros within ±10%",
+        expected: "In all three plans protein is 114.75–140.25 g, carbs 172.1–210.4 g, fat 42.5–51.9 g, kcal 1,615–1,700",
+        run() {
+          const plans = scenarios.three();
+          const goals = Optimizer.macroGoals(DEFAULTS);
+          return {
+            checks: [
+              [`goals are 127.5 / 191.25 / 47.2 g (got ${fmt(goals.protein.goal, 2)} / ${fmt(goals.carbs.goal, 2)} / ${fmt(goals.fat.goal, 1)})`,
+                goals.protein.goal === 127.5 && goals.carbs.goal === 191.25 && fmt(goals.fat.goal, 1) === "47.2"],
+              ...THREE.flatMap((k) => macroChecks(plans[k].title, plans[k], DEFAULTS)),
+            ],
+          };
+        },
+      },
+      {
+        title: "3,000 kcal with 160 g protein (about 21%)",
+        expected: "All three plans have protein within 144–176 g, not 235 g; carbs and fat are in range too; group limits grow to 3,000 ÷ 1,700",
+        run() {
+          // Plan 3 costs more than the default 4,000 kr at these calories, so the budget is higher here
+          const settings = { ...DEFAULTS, budget: 6000, kcal: 3000, proteinPct: 21.3, carbsPct: 53.7, fatPct: 25 };
+          const plans = Optimizer.planAll(settings, foods, groups, foods);
+          const checks = THREE.flatMap((k) => macroChecks(plans[k].title, plans[k], settings));
+          for (const key of THREE) {
+            const grams = plans[key].totals ? plans[key].totals.proteinPerDay : NaN;
+            checks.push([`${plans[key].title}: ${fmt(grams, 1)} g protein is far from the old 235 g`, grams <= 176]);
+          }
+          for (const key of ["realistic", "highQuality"]) {
+            const broken = plans[key].status === "optimal" ? rulesBroken(plans[key], key, settings) : ["no plan"];
+            checks.push([`${plans[key].title}: every rule holds` + (broken.length ? ` (broken: ${broken.join(", ")})` : ""), broken.length === 0]);
+          }
+          // The limit really is scaled: 3,000 kcal needs more dry grains than the 200 g limit at 1,700 kcal
+          const model = Optimizer.buildModel(settings, foods, { realistic: true, packs: true, groups });
+          const dry = groups.find((g) => g.id === "dry_grains");
+          const scaled = (dry.maxGramsPerDay * 3000) / 1700;
+          checks.push([`dry grains limit is scaled to ${fmt(scaled)} g`, Math.abs(model.constraints.group_dry_grains.max - scaled) < EPS]);
+          return { checks };
+        },
+      },
+      {
+        title: "The % must add up to 100",
+        expected: "30/45/25 and 21.3/53.7/25 are fine; 30/45/30, 30/45/20 and a missing % give an error, and the page refuses to make plans",
+        async run(app) {
+          const problem = (p, c, f) => Optimizer.macroSplitProblem({ proteinPct: p, carbsPct: c, fatPct: f });
+          const page = await pageSettings(app);
+          return {
+            checks: [
+              ["30/45/25 is fine", problem(30, 45, 25) === null],
+              ["21.3/53.7/25 is fine", problem(21.3, 53.7, 25) === null],
+              ["30/45/30 gives an error saying 105%", /105%/.test(problem(30, 45, 30) || "")],
+              ["30/45/20 gives an error saying 95%", /95%/.test(problem(30, 45, 20) || "")],
+              ["a missing % gives an error", Boolean(problem(30, 45, NaN))],
+              [`the page shows the error ("${page.sumError}")`, /100%/.test(page.sumError)],
+              ["the button shows it too and makes no plans", /100%/.test(page.buttonError) && page.noNewPlans],
+              ["the error goes away when the split is fixed", page.sumErrorFixed === ""],
+            ],
+          };
+        },
+      },
+      {
+        title: "Plan 3: same macros, higher quality",
+        expected: "Named “Same macros, higher quality”; ≥ 80% of protein from Excellent, fibre ≥ 25 g/day, saturated fat ≤ ⅓ of fat, and no “goal + 20 g” rule",
+        run() {
+          const p3 = scenarios.highQuality();
+          const t = p3.totals || {};
+          return {
+            plan: p3,
+            checks: [
+              [`title is "${p3.title}"`, p3.title === "Same macros, higher quality"],
+              [`fibre ${fmt(t.fiberPerDay || 0, 1)} g ≥ 25 g`, t.fiberPerDay >= 25 - EPS],
+              [`saturated fat ${fmt(t.saturatedFatPerDay || 0, 1)} g ≤ ⅓ of ${fmt(t.fatPerDay || 0, 1)} g fat`, t.saturatedFatPerDay <= t.fatPerDay / 3 + EPS],
+              [`${pct(p3.quality ? p3.quality.proteinShare.excellent : 0)} of protein from Excellent (≥ 80%)`, p3.quality && p3.quality.proteinShare.excellent >= 0.8 - EPS],
+              ["no extra-protein rules left", !("highQualityProteinExtra" in RULES) && !("proteinBuffer" in RULES)],
+            ],
+          };
+        },
+      },
+      {
+        title: "Presets and tolerance",
+        expected: "Balanced, High protein and Lower carb each give three plans inside the ranges; a ±5% tolerance gives a narrower range that is kept too",
+        run() {
+          const checks = [];
+          const presets = { Balanced: [30, 45, 25], "High protein": [35, 40, 25], "Lower carb": [30, 30, 40] };
+          for (const [name, [proteinPct, carbsPct, fatPct]] of Object.entries(presets)) {
+            const settings = { ...DEFAULTS, proteinPct, carbsPct, fatPct };
+            const plans = Optimizer.planAll(settings, foods, groups, foods);
+            checks.push(...THREE.flatMap((k) => macroChecks(`${name}, ${plans[k].title}`, plans[k], settings)));
+          }
+          const narrow = { ...DEFAULTS, tolerancePct: 5 };
+          const goals = Optimizer.macroGoals(narrow);
+          checks.push([`±5% of 127.5 g protein is ${fmt(goals.protein.min, 2)}–${fmt(goals.protein.max, 2)} g`,
+            Math.abs(goals.protein.min - 121.125) < EPS && Math.abs(goals.protein.max - 133.875) < EPS]);
+          const plans = Optimizer.planAll(narrow, foods, groups, foods);
+          checks.push(...THREE.flatMap((k) => macroChecks(`±5%, ${plans[k].title}`, plans[k], narrow)));
+          return { checks };
+        },
+      },
+      {
+        title: "Impossible plans name the macro and suggest foods",
+        expected: "No carb foods: “Carbs can't reach 172 g”, with carb foods from foods.json. Same for protein and fat. Plan 3 names fibre when fibre is what's missing",
+        run() {
+          const checks = [];
+          const notes = [];
+          // Foods that give at least 40% of their calories from this macro
+          const isSource = (f, macro, perGram) => (f[macro + "Per100g"] * perGram) / f.kcalPer100g >= 0.4;
+
+          // Everything except what's rich in carbs
+          const noCarbFoods = foods.filter((f) => f.carbsPer100g < 8);
+          const carbs = Optimizer.plan(DEFAULTS, noCarbFoods, foods);
+          const carbProblem = (carbs.problems || []).find((p) => p.code === "carbs");
+          checks.push(["no carb foods: says carbs can't reach 172 g", Boolean(carbProblem) && carbProblem.message.startsWith("Carbs can't reach 172 g")]);
+          const carbIdeas = foods.filter((f) => carbProblem && carbProblem.message.includes(`“${f.name}”`));
+          checks.push([`…and suggests carb foods that aren't in My foods (${carbIdeas.map((f) => f.id).join(", ")})`,
+            carbIdeas.length > 0 && carbIdeas.every((f) => isSource(f, "carbs", 4) && !noCarbFoods.includes(f))]);
+
+          // Everything except what's rich in fat
+          const noFatFoods = foods.filter((f) => f.fatPer100g < 2);
+          const fat = Optimizer.plan(DEFAULTS, noFatFoods, foods);
+          const fatProblem = (fat.problems || []).find((p) => p.code === "fat");
+          checks.push(["no fat foods: says fat can't reach about 43 g", Boolean(fatProblem) && /^Fat can't reach 4[23] g/.test(fatProblem.message)]);
+          const fatIdeas = foods.filter((f) => fatProblem && fatProblem.message.includes(`“${f.name}”`));
+          checks.push([`…and suggests fat foods (${fatIdeas.map((f) => f.id).join(", ")})`,
+            fatIdeas.length > 0 && fatIdeas.every((f) => isSource(f, "fat", 9))]);
+
+          // Too much of a macro: only fatty foods, so fat can't stay under its range
+          const fatty = pick(["oil", "olive_oil", "peanut_butter", "mixed_nuts", "avocado"]);
+          const tooFat = Optimizer.plan({ ...DEFAULTS, limits: Object.fromEntries(fatty.map((f) => [f.id, { max: 1000 }])) }, fatty, foods);
+          checks.push(["only fatty foods: says fat can't stay under its range",
+            tooFat.status === "infeasible" && tooFat.messages.some((m) => /^Fat can't stay under \d+ g/.test(m))]);
+
+          // Plan 3 only: enough of everything except fibre
+          const lowFibre = foods.filter((f) => f.fiberPer100g < 3);
+          const plans = Optimizer.planAll(DEFAULTS, lowFibre, groups, foods);
+          checks.push(["low-fibre foods: plan 2 still works", plans.realistic.status === "optimal"]);
+          checks.push(["low-fibre foods: plan 3 says fibre can't reach 25 g",
+            plans.highQuality.status === "infeasible" && plans.highQuality.messages.some((m) => m.startsWith("Fibre can't reach 25 g"))]);
+
+          // A message never suggests a food that can't be in the plan (one pack is more than its max per day)
+          const week = Optimizer.planAll({ ...DEFAULTS, days: 7 }, noFatFoods, groups, foods);
+          checks.push(["7 days: plans 2 and 3 don't suggest the 900 g bottle of oil",
+            week.realistic.status === "infeasible" && !week.realistic.messages.some((m) => m.includes("Rapeseed oil"))]);
+
+          notes.push(carbProblem ? carbProblem.message : "", fatProblem ? fatProblem.message : "");
+          return { checks, notes };
+        },
+      },
+      {
+        title: "Foods for flexible macros",
+        expected: "Mixed nuts, olive oil, whole-grain pasta and avocado are in foods.json with a pack, a price and nutrition “to check”; there's only one potatoes food",
+        run() {
+          const checks = [];
+          for (const id of ["mixed_nuts", "olive_oil", "pasta_wholegrain", "avocado"]) {
+            const f = foods.find((x) => x.id === id);
+            checks.push([`${id}: has a pack, a price, sources and “to check”`,
+              Boolean(f) && f.packGrams > 0 && f.packPrice > 0 && /Estimate/.test(f.priceSource) && /to check/.test(f.nutritionSource)]);
+          }
+          checks.push(["one potatoes food", foods.filter((f) => f.id.startsWith("potato")).length === 1]);
+          checks.push(["whole-grain pasta counts towards dry grains", foods.find((f) => f.id === "pasta_wholegrain").limitGroup === "dry_grains"]);
+          return { checks };
+        },
+      },
+      {
+        title: "Settings: grams, presets and moving old settings over",
+        expected:
+          "Defaults 1,700 kcal, 30/45/25, ±10%. Grams follow the % and calories (÷ 4, ÷ 4, ÷ 9); typing grams updates the %; presets fill in the %. " +
+          "Old saved settings (110 g protein at 1,700 kcal) become 25.9/47.6/26.5, and the old protein field is gone",
+        async run(app) {
+          const page = await pageSettings(app);
+          const moved = app.migrateSettings({ budget: 3000, kcal: 1700, protein: 110, days: 30 });
+          const movedSum = moved.proteinPct + moved.carbsPct + moved.fatPct;
+          const already = { budget: 1, kcal: 1700, proteinPct: 20, carbsPct: 50, fatPct: 30, days: 30 };
+          return {
+            checks: [
+              [`default fields: ${page.defaults}`, page.defaults === "1700 kcal 30/45/25 ±10"],
+              [`grams at the defaults: ${page.gramsAtStart}`, page.gramsAtStart === "128/191/47"],
+              [`3,000 kcal changes the grams: ${page.gramsAt3000}`, page.gramsAt3000 === "225/338/83"],
+              [`typing 160 g protein at 3,000 kcal gives ${page.pctFrom160} %`, page.pctFrom160 === "21.3"],
+              ["the grams field keeps what was typed", page.typedGramsKept === "160"],
+              [`presets: ${page.presets.join(" | ")}`, page.presets.join("|") === "35/40/25|30/30/40|30/45/25"],
+              ["the chosen preset is marked", page.presetPressed],
+              [`moving old settings: ${moved.proteinPct}/${moved.carbsPct}/${moved.fatPct}`, moved.proteinPct === 25.9 && moved.carbsPct === 47.6 && moved.fatPct === 26.5],
+              ["…they add up to 100", Math.round(movedSum * 10) / 10 === 100],
+              ["…and keep the other settings, without the old protein field", moved.budget === 3000 && !("protein" in moved)],
+              ["new settings are left alone", app.migrateSettings(already) === already],
+              [`a real reload moves saved old settings over (${page.reload.fields})`, page.reload.fields === "25.9/47.6/26.5"],
+              ["…and saves them in the new form", page.reload.saved && page.reload.saved.proteinPct === 25.9 && !("protein" in page.reload.saved)],
+            ],
+          };
+        },
+      },
+      {
+        title: "Macros tab: goal vs actual",
+        expected: "Protein, carbs and fat each show the goal grams, actual grams, goal % and actual %; all are in range, and the actual % add up to about 100",
+        async run(app) {
+          const page = await pagePlansOnce(app);
+          const rows = page.macroDay.goalRows;
+          const plan = scenarios.three().cheapest; // the plan the Macros tab shows after the card tap
+          const goals = Optimizer.macroGoals(DEFAULTS);
+          const whole = (n) => Math.round(n).toLocaleString("en-GB");
+          const grams = macroGrams(plan);
+          const split = plan.quality.macroSplit;
+          const pctSum = rows.reduce((sum, r) => sum + parseFloat(r.actualPct), 0);
+          return {
+            checks: [
+              [`rows: ${rows.map((r) => r.macro).join(", ")}`, rows.map((r) => r.macro).join() === "protein,carbs,fat"],
+              [`goal grams: ${rows.map((r) => r.goal).join(" | ")}`,
+                rows.every((r) => r.goal.startsWith(`${whole(goals[r.macro].goal)} g`) && r.goal.includes(`${whole(goals[r.macro].min)}–${whole(goals[r.macro].max)}`))],
+              [`actual grams: ${rows.map((r) => r.actual).join(" | ")}`, rows.every((r) => r.actual.startsWith(`${whole(grams[r.macro])} g`))],
+              [`goal %: ${rows.map((r) => r.goalPct).join(" / ")}`, rows.map((r) => r.goalPct).join() === "30%,45%,25%"],
+              [`actual %: ${rows.map((r) => r.actualPct).join(" / ")} match the optimizer`,
+                rows.every((r) => r.actualPct === `${Math.round(split[r.macro] * 100)}%`) && pctSum >= 99 && pctSum <= 101],
+              ["all three are marked in range", rows.every((r) => r.inRange)],
+              ["only fibre is left in the range rows below", page.macroDay.ranges.map((r) => r.name).join() === "Fibre"],
+            ],
+          };
+        },
+      },
     ];
 
     // Every rule of plan 2 or 3 that a plan breaks, as short texts ([] if none).
@@ -1336,16 +1570,25 @@
     function rulesBroken(plan, key, settings) {
       const broken = [];
       const t = plan.totals;
-      const proteinMin = settings.protein + (key === "highQuality" ? RULES.highQualityProteinExtra : RULES.proteinBuffer);
       const excellentMin = key === "highQuality" ? RULES.highQualityExcellentShare : RULES.excellentProteinShare;
       if (t.kcalPerDay < settings.kcal * RULES.kcalLowFactor - EPS || t.kcalPerDay > settings.kcal + EPS) broken.push(`kcal ${fmt(t.kcalPerDay)}`);
-      if (t.proteinPerDay < proteinMin - EPS) broken.push(`protein ${fmt(t.proteinPerDay, 1)} g`);
+      // Protein, carbs and fat within goal ± tolerance
+      const goals = Optimizer.macroGoals(settings);
+      for (const [m, grams] of Object.entries(macroGrams(plan))) {
+        if (grams < goals[m].min - EPS || grams > goals[m].max + EPS) broken.push(`${m} ${fmt(grams, 1)} g`);
+      }
+      // Plan 3's fibre and saturated fat
+      if (key === "highQuality") {
+        if (t.fiberPerDay < RULES.highQualityMinFiber - EPS) broken.push(`fibre ${fmt(t.fiberPerDay, 1)} g`);
+        if (t.saturatedFatPerDay > t.fatPerDay * RULES.highQualitySaturatedFatShare + EPS) broken.push(`sat. fat ${fmt(t.saturatedFatPerDay, 1)} g`);
+      }
       if (plan.quality.proteinShare.excellent < excellentMin - EPS) broken.push(`Excellent ${pct(plan.quality.proteinShare.excellent)}`);
-      if (plan.quality.kcalShare.poor > RULES.poorKcalShare + EPS) broken.push(`Poor ${pct(plan.quality.kcalShare.poor)}`);
       if (biggestKcalShare(plan) > RULES.varietyKcalShare + EPS) broken.push(`variety ${pct(biggestKcalShare(plan))}`);
       if (t.foodCount < RULES.minFoods) broken.push(`${t.foodCount} foods`);
       for (const g of groups) {
-        if (groupGrams(plan, g.id) > g.maxGramsPerDay + EPS) broken.push(`${g.id} ${fmt(groupGrams(plan, g.id))} g`);
+        // Group limits scale with the calories
+        const groupMax = (g.maxGramsPerDay * settings.kcal) / RULES.groupBaseKcal;
+        if (groupGrams(plan, g.id) > groupMax + EPS) broken.push(`${g.id} ${fmt(groupGrams(plan, g.id))} g`);
       }
       for (const i of plan.items) {
         const f = foodOf(i);
@@ -1757,7 +2000,10 @@
         // Default settings and every food in My foods, so the page matches scenarios.three()
         setInput("budget", DEFAULTS.budget);
         setInput("kcal", DEFAULTS.kcal);
-        setInput("protein", DEFAULTS.protein);
+        setInput("proteinPct", DEFAULTS.proteinPct);
+        setInput("carbsPct", DEFAULTS.carbsPct);
+        setInput("fatPct", DEFAULTS.fatPct);
+        setInput("tolerancePct", DEFAULTS.tolerancePct);
         setInput("days", DEFAULTS.days);
         for (const f of foods) app.addFood(f.id);
 
@@ -1794,7 +2040,16 @@
           const pie = section.querySelector(".macro-pie");
           return {
             pieStyle: pie ? pie.getAttribute("style") : "",
-            rows: [...section.querySelectorAll(".macro-table tbody tr")].map((r) => r.dataset.macro),
+            rows: [...section.querySelectorAll(".macro-table tbody tr[data-macro]")].map((r) => r.dataset.macro),
+            // Goal vs actual table: the text of each cell, per macro
+            goalRows: [...section.querySelectorAll("tr[data-goal-macro]")].map((r) => ({
+              macro: r.dataset.goalMacro,
+              goal: r.querySelector(".goal-grams").textContent,
+              actual: r.querySelector(".actual-grams").textContent,
+              goalPct: r.querySelector(".goal-pct").textContent,
+              actualPct: r.querySelector(".actual-pct").textContent,
+              inRange: r.classList.contains("goal-in"),
+            })),
             pcts: texts(".macro-table tbody .macro-pct"),
             grams: texts(".macro-grams"),
             kcal: texts(".macro-kcal"),
@@ -1832,7 +2087,7 @@
         };
 
         // Change a setting: the dot and the "out of date" note should appear
-        setInput("protein", DEFAULTS.protein + 1);
+        setInput("budget", DEFAULTS.budget + 1);
         const dotAfter = !doc.getElementById("plans-dot").hidden;
         const staleShown = !doc.getElementById("plans-stale").hidden;
 
@@ -1873,7 +2128,7 @@
       return html;
     }
 
-    // Type protein values into the hidden page and read the info line and food labels.
+    // Type protein % values into the hidden page and read the info line and food labels.
     // The page saves settings to localStorage when they change, so the real saved
     // settings are put back afterwards.
     async function pageChange(app, newProtein) {
@@ -1893,13 +2148,98 @@
       });
       try {
         setInput("kcal", 1700);
-        setInput("protein", 110);
+        setInput("proteinPct", 30);
         const before = read();
-        setInput("protein", newProtein);
+        setInput("proteinPct", newProtein);
         const after = read();
         return { before, after };
       } finally {
         // Put the user's own saved settings back
+        if (saved === null) app.localStorage.removeItem("pbp.settings");
+        else app.localStorage.setItem("pbp.settings", saved);
+      }
+    }
+
+    // Try out the settings form on the hidden page: grams, presets, the 100% error and a
+    // real reload with old saved settings. The user's saved settings are put back afterwards.
+    let settingsPageResult = null;
+    async function pageSettings(app) {
+      if (settingsPageResult) return settingsPageResult;
+      const doc = app.document;
+      const saved = app.localStorage.getItem("pbp.settings");
+      const value = (id) => doc.getElementById(id).value;
+      const setInput = (id, v) => {
+        const input = doc.getElementById(id);
+        input.value = v;
+        input.dispatchEvent(new app.Event("input", { bubbles: true }));
+      };
+      const grams = () => `${value("proteinGrams")}/${value("carbsGrams")}/${value("fatGrams")}`;
+      const pcts = () => `${value("proteinPct")}/${value("carbsPct")}/${value("fatPct")}`;
+      const tapPreset = (split) => {
+        doc.querySelector(`[data-preset="${split}"]`).click();
+        return pcts();
+      };
+      try {
+        // What a new user gets: the values written in index.html
+        const defaultOf = (id) => doc.getElementById(id).getAttribute("value");
+        const defaults = `${defaultOf("kcal")} kcal ${defaultOf("proteinPct")}/${defaultOf("carbsPct")}/${defaultOf("fatPct")} ±${defaultOf("tolerancePct")}`;
+
+        setInput("kcal", 1700);
+        const presets = [];
+        presets.push(tapPreset("35,40,25"));
+        presets.push(tapPreset("30,30,40"));
+        presets.push(tapPreset("30,45,25"));
+        const presetPressed = doc.querySelector('[data-preset="30,45,25"]').getAttribute("aria-pressed") === "true" &&
+          doc.querySelector('[data-preset="35,40,25"]').getAttribute("aria-pressed") === "false";
+        const gramsAtStart = grams();
+        setInput("kcal", 3000);
+        const gramsAt3000 = grams();
+        setInput("proteinGrams", 160);
+        const pctFrom160 = value("proteinPct");
+        const typedGramsKept = value("proteinGrams");
+
+        // A split that doesn't add up: an error under the fields, and the button makes no plans
+        setInput("kcal", 1700);
+        setInput("proteinPct", 30);
+        setInput("carbsPct", 45);
+        setInput("fatPct", 30);
+        const sumError = doc.getElementById("macro-error").textContent;
+        // Cards are redrawn with a marker removed if plans are made, so a leftover marker means none were
+        const cards = doc.getElementById("plan-cards");
+        const before = cards.innerHTML;
+        cards.innerHTML = before + '<span id="no-new-plans"></span>';
+        await app.makeGroceryList();
+        const buttonError = doc.getElementById("plan-error").textContent;
+        const noNewPlans = Boolean(doc.getElementById("no-new-plans"));
+        cards.innerHTML = before;
+        doc.getElementById("plan-error").textContent = "";
+        setInput("fatPct", 25);
+        const sumErrorFixed = doc.getElementById("macro-error").textContent;
+
+        // A real reload in a second hidden page, with settings saved by the old version
+        app.localStorage.setItem("pbp.settings", JSON.stringify({ budget: 3000, kcal: 1700, protein: 110, days: 30 }));
+        const frame = document.createElement("iframe");
+        frame.hidden = true;
+        frame.src = "index.html";
+        await new Promise((resolve) => { frame.onload = resolve; document.body.appendChild(frame); });
+        const reloadDoc = frame.contentDocument;
+        const reload = {
+          fields: ["proteinPct", "carbsPct", "fatPct"].map((id) => reloadDoc.getElementById(id).value).join("/"),
+          saved: JSON.parse(app.localStorage.getItem("pbp.settings")),
+        };
+        frame.remove();
+
+        settingsPageResult = {
+          defaults, gramsAtStart, gramsAt3000, pctFrom160, typedGramsKept, presets, presetPressed,
+          sumError, buttonError, noNewPlans, sumErrorFixed, reload,
+        };
+        return settingsPageResult;
+      } finally {
+        // Back to the defaults on the page, then the user's own saved settings
+        setInput("kcal", DEFAULTS.kcal);
+        setInput("proteinPct", DEFAULTS.proteinPct);
+        setInput("carbsPct", DEFAULTS.carbsPct);
+        setInput("fatPct", DEFAULTS.fatPct);
         if (saved === null) app.localStorage.removeItem("pbp.settings");
         else app.localStorage.setItem("pbp.settings", saved);
       }

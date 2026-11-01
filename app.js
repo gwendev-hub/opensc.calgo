@@ -1,15 +1,41 @@
 // Key used to store the settings in the browser's localStorage
 const SETTINGS_KEY = "pbp.settings";
 
-// The names of the four settings inputs (matches the id of each <input>)
-const SETTING_FIELDS = ["budget", "kcal", "protein", "days"];
+// The names of the settings inputs (matches the id of each <input>)
+const SETTING_FIELDS = ["budget", "kcal", "proteinPct", "carbsPct", "fatPct", "tolerancePct", "days"];
 
-// Read saved settings from localStorage.
+// The three macros in the split, and their kcal per gram (grams = kcal × % ÷ this)
+const SPLIT_MACROS = [
+  { key: "protein", label: "Protein", kcalPerGram: 4 },
+  { key: "carbs", label: "Carbs", kcalPerGram: 4 },
+  { key: "fat", label: "Fat", kcalPerGram: 9 },
+];
+
+// The share of the rest that goes to carbs when moving old settings over (the default 45/25 split)
+const OLD_SETTINGS_CARB_SHARE = 45 / 70;
+
+// A % with at most one decimal, as a number (e.g. 21.3)
+const roundPct = (value) => Math.round(value * 10) / 10;
+
+// Moving old users over: settings saved before the macro split have a protein goal in grams.
+// That goal becomes the protein %, and carbs and fat share the rest like the default split.
+// E.g. 110 g at 1,700 kcal → 25.9 / 47.6 / 26.5. Newer settings come back unchanged.
+function migrateSettings(saved) {
+  if (typeof saved.protein !== "number" || typeof saved.proteinPct === "number") return saved;
+  const { protein, ...rest } = saved;
+  const kcal = saved.kcal > 0 ? saved.kcal : 1700;
+  const proteinPct = Math.min(100, roundPct(((protein * 4) / kcal) * 100));
+  const carbsPct = roundPct((100 - proteinPct) * OLD_SETTINGS_CARB_SHARE);
+  // Fat takes what's left, so the three always add up to exactly 100
+  return { ...rest, proteinPct, carbsPct, fatPct: roundPct(100 - proteinPct - carbsPct) };
+}
+
+// Read saved settings from localStorage (old ones are moved over to the macro split).
 // Returns an object like { budget: 4000, ... } or null if nothing is saved.
 function loadSettings() {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? JSON.parse(raw) : null;
+    return raw ? migrateSettings(JSON.parse(raw)) : null;
   } catch (err) {
     // localStorage can be blocked (e.g. private browsing) or hold bad data
     return null;
@@ -25,7 +51,7 @@ function saveSettings(settings) {
   }
 }
 
-// Read the four inputs on the page into a settings object of numbers
+// Read the inputs on the page into a settings object of numbers
 function readSettingsFromForm() {
   const settings = {};
   for (const field of SETTING_FIELDS) {
@@ -42,6 +68,31 @@ function fillForm(settings) {
       document.getElementById(field).value = value;
     }
   }
+}
+
+// Fill in the grams from the % and calories. skipId is the field being typed in, which
+// keeps what the user typed. Then show the error if the split doesn't add up to 100%.
+function renderMacroFields(skipId = null) {
+  const settings = readSettingsFromForm();
+  const goals = Optimizer.macroGoals(settings);
+  for (const m of SPLIT_MACROS) {
+    const id = `${m.key}Grams`;
+    if (id !== skipId) document.getElementById(id).value = Math.round(goals[m.key].goal);
+  }
+  document.getElementById("macro-error").textContent = Optimizer.macroSplitProblem(settings) || "";
+  // Highlight the preset that matches the current split, if any
+  const split = `${settings.proteinPct},${settings.carbsPct},${settings.fatPct}`;
+  for (const button of document.querySelectorAll("[data-preset]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.preset === split));
+  }
+}
+
+// Grams were typed: work out that macro's % from them and the calories
+function gramsToPct(macroKey) {
+  const kcal = Number(document.getElementById("kcal").value);
+  const grams = Number(document.getElementById(`${macroKey}Grams`).value);
+  const macro = SPLIT_MACROS.find((m) => m.key === macroKey);
+  if (kcal > 0) document.getElementById(`${macroKey}Pct`).value = roundPct(((grams * macro.kcalPerGram) / kcal) * 100);
 }
 
 // ---------- Foods ----------
@@ -88,7 +139,7 @@ function krPer100gProtein(f) {
 // The average protein density the whole plan needs: g protein per 100 kcal.
 // Shown for information only; it does NOT decide lifts/dilutes (PLAN.md section 4.2).
 function targetDensity(settings) {
-  return settings.kcal > 0 ? (settings.protein / settings.kcal) * 100 : 0;
+  return settings.kcal > 0 ? (Optimizer.macroGoals(settings).protein.goal / settings.kcal) * 100 : 0;
 }
 
 // Fixed rule, independent of settings: more than 10 g protein per 100 kcal lifts the plan,
@@ -231,7 +282,7 @@ function limitEditorHtml(f) {
   const limit = foodLimitFor(f.id);
   // Tell the user what "empty" means for this food
   const realistic = typeof f.realisticMaxGramsPerDay === "number"
-    ? ` (Cheapest realistic and High quality: ${f.realisticMaxGramsPerDay} g)`
+    ? ` (Cheapest realistic and Same macros, higher quality: ${f.realisticMaxGramsPerDay} g)`
     : "";
   const value = (key) => (typeof limit[key] === "number" ? limit[key] : "");
   return `
@@ -698,6 +749,7 @@ function planCardHtml(plan) {
       <span class="plan-cost">${num(t.shoppingCost)} kr ${t.overBudget ? '<span class="over">✘</span>' : '<span class="within">✔</span>'}</span>
       ${budgetLine}
       <span class="plan-stat">${num(t.proteinPerDay)} g protein/day · ${num(t.kcalPerDay)} kcal/day</span>
+      <span class="plan-stat">${num(t.carbsPerDay)} g carbs · ${num(t.fatPerDay)} g fat · ${num(t.fiberPerDay)} g fibre/day</span>
       <span class="plan-stat">${pct(plan.quality.proteinShare.excellent)} protein from Excellent · ${t.foodCount} foods</span>`;
   } else {
     // No plan: say so on the card; the reasons are shown below when it's selected
@@ -715,7 +767,6 @@ function planCardHtml(plan) {
 // Build the protein quality section (PLAN.md section 4.4) for one plan
 function proteinQualityHtml(plan) {
   const share = plan.quality.proteinShare;
-  const t = plan.totals;
 
   // Coloured bar: % of protein from Excellent / OK / Poor foods
   const parts = ["excellent", "ok", "poor"].filter((r) => share[r] > 0);
@@ -726,33 +777,51 @@ function proteinQualityHtml(plan) {
     .map((r) => `<span class="badge ${r}">${RATING_LABELS[r]} ${pct(share[r])}</span>`)
     .join(" ");
 
-  // Warning for any single Poor food that gives more than 15% of the calories
-  const warnings = plan.items
-    .filter((i) => i.rating === "poor" && i.kcalPerDay / t.kcalPerDay > 0.15)
-    .map((i) =>
-      `<p class="warning">${esc(i.name)} gives ${pct(i.kcalPerDay / t.kcalPerDay)} of your calories ` +
-      `but only ${pct(i.proteinPerDay / t.proteinPerDay)} of your protein.</p>`)
-    .join("");
-
   return `
     <h3>Protein quality</h3>
     <p class="hint">Where your protein comes from:</p>
     <div class="quality-bar" role="img" aria-label="Protein from Excellent ${pct(share.excellent)}, OK ${pct(share.ok)}, Poor ${pct(share.poor)}">${bar}</div>
     <p class="legend">${legend}</p>
-    <p>${pct(plan.quality.proteinKcalShare)} of your calories come from protein.</p>
-    ${warnings}`;
+    <p>${pct(plan.quality.proteinKcalShare)} of your calories come from protein.</p>`;
 }
 
 // Show grams per day or per month in the macro section ("day" or "month")
 let macroPeriod = "day";
 
-// Ranges shown under the pie (PLAN.md section 4.5): green inside, yellow outside.
-// Fibre is in grams per day; fat and carbs are shares of energy.
+// Range shown under the pie (PLAN.md section 4.5): green inside, yellow outside.
+// Protein, carbs and fat are compared with your own goals in the table above it instead.
 const MACRO_RANGES = {
   fiber: { min: 25, max: 35 },
-  fat: { min: 0.25, max: 0.4 },
-  carbs: { min: 0.45, max: 0.6 },
 };
+
+// Goal vs actual for protein, carbs and fat: grams per day and % of their energy.
+// A macro is green with ✔ when its grams are inside goal ± tolerance.
+function macroGoalHtml(plan, settings) {
+  const goals = Optimizer.macroGoals(settings);
+  const t = plan.totals;
+  const actual = { protein: t.proteinPerDay, carbs: t.carbsPerDay, fat: t.fatPerDay };
+  const rows = SPLIT_MACROS.map((m) => {
+    const goal = goals[m.key];
+    const inside = actual[m.key] >= goal.min - 1e-6 && actual[m.key] <= goal.max + 1e-6;
+    return `
+      <tr data-goal-macro="${m.key}" class="${inside ? "goal-in" : "goal-out"}">
+        <th scope="row"><span class="swatch ${m.key}"></span>${m.label}</th>
+        <td class="num goal-grams">${num(goal.goal)} g<br><span class="muted goal-range">${num(goal.min)}–${num(goal.max)}</span></td>
+        <td class="num actual-grams">${num(actual[m.key])} g ${inside ? "✔" : "✘"}</td>
+        <td class="num goal-pct">${roundPct(goal.pct)}%</td>
+        <td class="num actual-pct">${pct(plan.quality.macroSplit[m.key])}</td>
+      </tr>`;
+  }).join("");
+  return `
+    <h3>Goal vs actual, per day</h3>
+    <table class="macro-table macro-goals">
+      <thead>
+        <tr><th scope="col">Macro</th><th scope="col" class="num">Goal</th><th scope="col" class="num">Actual</th><th scope="col" class="num">Goal %</th><th scope="col" class="num">Actual %</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="hint">Under each goal is the range allowed by your ±${num(settings.tolerancePct)}% tolerance. Actual % is the share of the energy from protein, carbs and fat, so it adds up to 100%. The table below also counts fibre.</p>`;
+}
 
 // One range row: name, value, the range, and a green ✔ or a yellow "below"/"above"
 function rangeRowHtml(label, value, range, text, rangeText) {
@@ -850,13 +919,12 @@ function macroHtml(plan) {
   const ranges = `
     <ul class="ranges">
       ${rangeRowHtml("Fibre", t.fiberPerDay, MACRO_RANGES.fiber, `${num(t.fiberPerDay)} g/day`, "25–35 g")}
-      ${rangeRowHtml("Fat", share.fat, MACRO_RANGES.fat, pct(share.fat), "25–40%")}
-      ${rangeRowHtml("Carbs", share.carbs, MACRO_RANGES.carbs, pct(share.carbs), "45–60%")}
     </ul>`;
 
   return `
     <h2>Macros</h2>
     ${switcher}
+    ${macroGoalHtml(plan, planSettings)}
     <p class="hint">${esc(plan.title)}: grams and kcal ${period}. kcal = grams × 4 for protein and carbs, × 9 for fat, × 2 for fibre.</p>
     ${toggle}
     <div class="macro-row">${pie}${table}</div>
@@ -1042,7 +1110,9 @@ function renderPlans() {
 // Check the settings before running the optimizer. Returns an error text, or null if fine.
 function settingsProblem(settings) {
   if (!(settings.kcal > 0)) return "Enter your daily calories first.";
-  if (!(settings.protein > 0)) return "Enter your daily protein minimum first.";
+  const splitProblem = Optimizer.macroSplitProblem(settings);
+  if (splitProblem) return splitProblem;
+  if (!(settings.tolerancePct >= 1 && settings.tolerancePct <= 50)) return "Enter a tolerance between 1% and 50%.";
   if (!(settings.days >= 1)) return "Enter how many days the list should cover.";
   if (!(settings.budget >= 0)) return "Enter your monthly budget first.";
   return null;
@@ -1165,17 +1235,38 @@ function init() {
   const saved = loadSettings();
   if (saved) {
     fillForm(saved);
+    // Keep old settings in their new form (saved again unchanged if they already were)
+    saveSettings(readSettingsFromForm());
   }
 
-  // Show the personal target density straight away
+  // Show the macro grams and the personal target density straight away
+  renderMacroFields();
   renderTargetDensity();
 
-  // Settings changed: save them and update the info line (food labels don't depend on settings)
-  const form = document.getElementById("settings-form");
-  form.addEventListener("input", () => {
+  // Something in the settings changed: save it and redraw what depends on it
+  const settingsChanged = (skipId) => {
+    renderMacroFields(skipId);
     saveSettings(readSettingsFromForm());
     renderTargetDensity();
     markPlansStale();
+  };
+
+  // Settings changed (food labels don't depend on settings). Grams update their %
+  // first; the field being typed in keeps what the user typed.
+  const form = document.getElementById("settings-form");
+  form.addEventListener("input", (event) => {
+    const typedGrams = SPLIT_MACROS.find((m) => event.target.id === `${m.key}Grams`);
+    if (typedGrams) gramsToPct(typedGrams.key);
+    settingsChanged(event.target.id);
+  });
+
+  // A preset button fills in all three %
+  form.addEventListener("click", (event) => {
+    const preset = event.target.closest("[data-preset]");
+    if (!preset) return;
+    const pcts = preset.dataset.preset.split(",");
+    SPLIT_MACROS.forEach((m, i) => (document.getElementById(`${m.key}Pct`).value = pcts[i]));
+    settingsChanged();
   });
 
   // A food in My foods was unticked: remove it from My foods

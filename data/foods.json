@@ -444,6 +444,26 @@
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
   {
+    "id": "pasta_wholegrain",
+    "name": "Whole-grain pasta, dry",
+    "aliases": ["whole wheat pasta", "wholegrain pasta", "fullkornspasta", "fullkornsmakaroner", "pasta"],
+    "category": "Grains & bread",
+    "packGrams": 500,
+    "packPrice": 22,
+    "pieceGrams": null,
+    "kcalPer100g": 340,
+    "proteinPer100g": 12,
+    "carbsPer100g": 62,
+    "fiberPer100g": 8,
+    "fatPer100g": 2,
+    "saturatedFatPer100g": 0.4,
+    "sugarPer100g": 3,
+    "maxGramsPerDay": 150,
+    "limitGroup": "dry_grains",
+    "priceSource": "Estimate, Nov 2026",
+    "nutritionSource": "Label / Livsmedelsverket (to check)"
+  },
+  {
     "id": "potatoes",
     "name": "Potatoes",
     "aliases": ["potato", "potatoes", "potatis"],
@@ -520,6 +540,26 @@
     "sugarPer100g": 3,
     "maxGramsPerDay": 400,
     "priceSource": "Estimate, Oct 2026",
+    "nutritionSource": "Label / Livsmedelsverket (to check)"
+  },
+  {
+    "id": "avocado",
+    "name": "Avocado (2 pcs)",
+    "aliases": ["avocado", "avokado", "fruit", "frukt"],
+    "category": "Fruit & veg",
+    "packGrams": 300,
+    "packPrice": 30,
+    "pieceGrams": 150,
+    "pieceName": "avocados",
+    "kcalPer100g": 160,
+    "proteinPer100g": 2,
+    "carbsPer100g": 2,
+    "fiberPer100g": 6.7,
+    "fatPer100g": 15,
+    "saturatedFatPer100g": 2.1,
+    "sugarPer100g": 0.7,
+    "maxGramsPerDay": 150,
+    "priceSource": "Estimate, Nov 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
   {
@@ -601,6 +641,26 @@
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   },
   {
+    "id": "mixed_nuts",
+    "name": "Mixed nuts",
+    "aliases": ["nuts", "nut mix", "nötter", "nötmix", "blandade nötter"],
+    "category": "Snacks & fats",
+    "packGrams": 200,
+    "packPrice": 39,
+    "pieceGrams": null,
+    "kcalPer100g": 610,
+    "proteinPer100g": 20,
+    "carbsPer100g": 13,
+    "fiberPer100g": 8,
+    "fatPer100g": 52,
+    "saturatedFatPer100g": 7,
+    "sugarPer100g": 5,
+    "maxGramsPerDay": 40,
+    "minGramsIfUsed": 10,
+    "priceSource": "Estimate, Nov 2026",
+    "nutritionSource": "Label / Livsmedelsverket (to check)"
+  },
+  {
     "id": "barebells",
     "name": "Barebells bar 55 g",
     "aliases": ["barebells", "protein bar", "proteinbar", "bar"],
@@ -656,6 +716,27 @@
     "maxGramsPerDay": 20,
     "minGramsIfUsed": 10,
     "priceSource": "Estimate, Oct 2026",
+    "nutritionSource": "Label / Livsmedelsverket (to check)"
+  },
+  {
+    "id": "olive_oil",
+    "name": "Olive oil",
+    "aliases": ["olive oil", "oil", "olivolja", "olja", "matolja"],
+    "category": "Snacks & fats",
+    "starter": true,
+    "packGrams": 460,
+    "packPrice": 89,
+    "pieceGrams": null,
+    "kcalPer100g": 884,
+    "proteinPer100g": 0,
+    "carbsPer100g": 0,
+    "fiberPer100g": 0,
+    "fatPer100g": 100,
+    "saturatedFatPer100g": 14,
+    "sugarPer100g": 0,
+    "maxGramsPerDay": 30,
+    "minGramsIfUsed": 10,
+    "priceSource": "Estimate, Nov 2026",
     "nutritionSource": "Label / Livsmedelsverket (to check)"
   }
 ]

@@ -12,16 +12,53 @@ const Optimizer = (() => {
   const DEFAULT_RULES = {
     kcalLowFactor: 0.95, // calories must land between 95% and 100% of the target
     excellentProteinShare: 0.6, // at least 60% of protein from Excellent foods
-    poorKcalShare: 0.4, // Poor foods give at most 40% of calories
     varietyKcalShare: 0.35, // no single food gives more than 35% of calories
     // Realistic rules, used by plans 2 and 3 only (PLAN.md section 5, "Three plans")
     minGramsIfUsed: 35, // a food is either not in the plan or at least 35 g a day (foods.json can lower it, e.g. fats)
     minFoods: 10, // at least this many different foods
-    proteinBuffer: 5, // plan 2 aims this many grams above the protein minimum
-    // Plan 3 "High quality"
-    highQualityProteinExtra: 20, // protein at least minimum + 20 g
+    groupBaseKcal: 1700, // groups.json limits are for this many kcal; they scale with kcalTarget ÷ this
+    // Extra rules, only switched on by plan 3 (the defaults here never block anything)
+    minFiberPerDay: 0, // fibre at least this many grams a day
+    maxSaturatedFatShare: 1, // saturated fat at most this share of the fat
+    // Plan 3 "Same macros, higher quality"
     highQualityExcellentShare: 0.8, // at least 80% of protein from Excellent foods
+    highQualityMinFiber: 25, // fibre at least 25 g a day
+    highQualitySaturatedFatShare: 1 / 3, // saturated fat at most ⅓ of the fat
   };
+
+  // kcal per gram of the three macros in the plan (fibre isn't part of the split)
+  const MACRO_KCAL = { protein: 4, carbs: 4, fat: 9 };
+  // Names for messages
+  const MACRO_LABELS = { protein: "Protein", carbs: "Carbs", fat: "Fat" };
+  // Default tolerance: each macro may be this many % of its grams above or below its goal
+  const DEFAULT_TOLERANCE_PCT = 10;
+
+  // Each macro's goal in grams per day, and the range the plans must stay in.
+  // settings: { kcal, proteinPct, carbsPct, fatPct, tolerancePct }
+  // E.g. 1,700 kcal with 45% carbs: 1700 × 0.45 ÷ 4 = 191 g, ±10% = 172–210 g.
+  // Returns { protein: { pct, goal, min, max }, carbs: …, fat: … }
+  function macroGoals(settings) {
+    const tolerance =
+      (typeof settings.tolerancePct === "number" ? settings.tolerancePct : DEFAULT_TOLERANCE_PCT) / 100;
+    const goals = {};
+    for (const m of Object.keys(MACRO_KCAL)) {
+      const pct = settings[m + "Pct"];
+      const goal = (settings.kcal * pct) / 100 / MACRO_KCAL[m];
+      goals[m] = { pct, goal, min: goal * (1 - tolerance), max: goal * (1 + tolerance) };
+    }
+    return goals;
+  }
+
+  // The split must add up to 100% (rounded to one decimal, because typing grams gives
+  // values like 21.3%). Returns an error text, or null if the split is fine.
+  function macroSplitProblem(settings) {
+    const pcts = Object.keys(MACRO_KCAL).map((m) => settings[m + "Pct"]);
+    if (pcts.some((pct) => typeof pct !== "number" || Number.isNaN(pct) || pct < 0)) {
+      return "Enter a % of 0 or more for protein, carbs and fat.";
+    }
+    const sum = Math.round(pcts.reduce((total, pct) => total + pct, 0) * 10) / 10;
+    return sum === 100 ? null : `Protein, carbs and fat must add up to 100%. Now they add up to ${sum}%.`;
+  }
 
   // Amounts below this many grams per day are treated as zero.
   // The solver can return tiny amounts like 0.0000001 g, and we don't want
@@ -135,16 +172,25 @@ const Optimizer = (() => {
   // Up to 3 foods from the full food list (catalog) that aren't in My foods yet and
   // pass the test, cheapest protein first, e.g. "Keso 4%, Kvarg naturell or Firm tofu".
   // "" if there are none (or no catalog was passed in).
-  function suggestFoods(catalog, foods, test) {
+  function suggestFoods(catalog, foods, test, nutrient = "proteinPer100g") {
     const mine = new Set(foods.map((f) => f.id));
-    // kr per gram of protein, so the cheapest protein sources come first
-    const krPerProtein = (f) => (f.proteinPer100g > 0 ? f.packPrice / f.packGrams / f.proteinPer100g : Infinity);
+    // kr per gram of the nutrient (protein unless told otherwise), so the cheapest sources come first
+    const krPerGram = (f) => (f[nutrient] > 0 ? f.packPrice / f.packGrams / f[nutrient] : Infinity);
     const names = (catalog || [])
       .filter((f) => !mine.has(f.id) && test(f))
-      .sort((a, b) => krPerProtein(a) - krPerProtein(b))
+      .sort((a, b) => krPerGram(a) - krPerGram(b))
       .slice(0, 3)
       .map((f) => f.name);
     return joinNames(names, "or");
+  }
+
+  // Foods to suggest for a macro that can't be reached: those that get at least 40% of
+  // their calories from it, cheapest grams first (e.g. rice, pasta and potatoes for carbs)
+  // usable (optional) leaves out foods that can't help the plan being explained.
+  function suggestForMacro(catalog, foods, macro, usable = () => true) {
+    const isSource = (f) =>
+      f.kcalPer100g > 0 && (f[macro + "Per100g"] * MACRO_KCAL[macro]) / f.kcalPer100g >= 0.4 && usable(f);
+    return suggestFoods(catalog, foods, isSource, macro + "Per100g");
   }
 
   // " You set your own max for X and Y in My foods; raising them may help." ("" if there are none)
@@ -157,18 +203,17 @@ const Optimizer = (() => {
   }
 
   // Build the javascript-lp-solver model.
-  // settings: { kcal, protein, budget, days, limits?, rules? }
+  // settings: { kcal, proteinPct, carbsPct, fatPct, tolerancePct, budget, days, limits?, rules? }
   // foods:    only the foods in My foods
   // options changes the goal, adds rules or drops rules:
   //   optimize/opType     – what to maximise or minimise (default: minimise cost)
-  //   skip                – names of rules to leave out ("kcalMin", "protein",
-  //                         "excellent", "poor", "variety")
+  //   skip                – names of rules to leave out ("kcalMin", "protein", "carbs",
+  //                         "fat", "excellent", "variety", "fiber", "satFat")
   //   realistic           – plans 2 and 3: 35 g floor per food, realistic max
   //                         limits, at least 10 foods and the group limits
   //   packs               – plans 2 and 3: each food's variable is the number of whole
   //                         packages per month (an integer) instead of grams per day
   //   groups              – food-group limits from data/groups.json (realistic only)
-  //   proteinMin          – protein minimum to use instead of settings.protein
   // Rule shares (Excellent share etc.) come from settings.rules.
   function buildModel(settings, foods, options = {}) {
     const rules = rulesFrom(settings);
@@ -185,31 +230,34 @@ const Optimizer = (() => {
       ? { max: kcalTarget }
       : { min: kcalTarget * rules.kcalLowFactor, max: kcalTarget };
 
-    // Protein minimum (plans 2 and 3 pass a higher one)
-    const proteinMin = typeof options.proteinMin === "number" ? options.proteinMin : settings.protein;
-    if (!skip.has("protein")) constraints.protein = { min: proteinMin };
+    // Protein, carbs and fat: each within its goal ± the tolerance
+    const goals = macroGoals(settings);
+    for (const m of Object.keys(goals)) {
+      if (!skip.has(m)) constraints[m] = { min: goals[m].min, max: goals[m].max };
+    }
+
+    // Plan 3 only: enough fibre, and saturated fat at most a share of the fat, written
+    // so it stays linear: Σ saturated fat − ⅓ · Σ fat ≤ 0
+    if (rules.minFiberPerDay > 0 && !skip.has("fiber")) constraints.fiber = { min: rules.minFiberPerDay };
+    if (rules.maxSaturatedFatShare < 1 && !skip.has("satFat")) constraints.satFat = { max: 0 };
 
     // At least 10 different foods: every food's yes/no variable counts 1 (see the floor below)
     if (realistic) constraints.foodCount = { min: rules.minFoods };
 
-    // Food-group limits, e.g. dairy ≤ 700 g a day: each food in the group counts 1 per gram
+    // Food-group limits, e.g. dairy ≤ 700 g a day at 1,700 kcal: each food in the group
+    // counts 1 per gram. The limits grow and shrink with the calories (kcalTarget ÷ 1,700).
     const groupMax = {};
     if (realistic) {
       for (const g of options.groups || []) {
-        constraints["group_" + g.id] = { max: g.maxGramsPerDay };
-        groupMax[g.id] = g.maxGramsPerDay;
+        const max = (g.maxGramsPerDay * kcalTarget) / rules.groupBaseKcal;
+        constraints["group_" + g.id] = { max };
+        groupMax[g.id] = max;
       }
     }
 
     // Excellent share, written so it stays linear (PLAN.md section 5):
     // Σ_excellent protein − 0.60 · Σ_all protein ≥ 0
     if (!skip.has("excellent")) constraints.excellentShare = { min: 0 };
-
-    // Poor calorie cap, compared with the plan's actual total calories:
-    // Σ_poor kcal − 0.40 · Σ_all kcal ≤ 0.
-    // Total kcal is never above the target, so this is never looser than
-    // "≤ 0.40 × kcalTarget" from section 5, and "40% of calories" is exactly true.
-    if (!skip.has("poor")) constraints.poorKcal = { max: 0 };
 
     // Does a food that gives at most maxKcal a day need a variety constraint?
     // Not if that's within 35% of the calorie minimum (only known when that minimum is used).
@@ -236,10 +284,13 @@ const Optimizer = (() => {
         cost: (f.packPrice / f.packGrams) * unit, // kr per day
         kcal,
         protein,
+        carbs: (f.carbsPer100g / 100) * unit, // carb grams per day
+        fat: (f.fatPer100g / 100) * unit, // fat grams per day
+        fiber: (f.fiberPer100g / 100) * unit, // fibre grams per day
+        // Saturated fat minus ⅓ of the fat (see satFat above)
+        satFat: ((f.saturatedFatPer100g - rules.maxSaturatedFatShare * f.fatPer100g) / 100) * unit,
         // 1 − 0.60 for Excellent foods, −0.60 for the rest (see excellentShare above)
         excellentShare: protein * ((rating === "excellent" ? 1 : 0) - rules.excellentProteinShare),
-        // 1 − 0.40 for Poor foods, −0.40 for the rest (see poorKcal above)
-        poorKcal: kcal * ((rating === "poor" ? 1 : 0) - rules.poorKcalShare),
       };
 
       // Per-food limits: min ≤ amount ≤ max (grams per day, or packages).
@@ -280,7 +331,7 @@ const Optimizer = (() => {
       if (realistic && f.limitGroup && f.limitGroup in groupMax) v["group_" + f.limitGroup] = unit;
 
       // Variety: this food's kcal − 0.35 · total kcal ≤ 0.
-      // Like the Poor cap, it's measured against the actual total, so no
+      // It's measured against the actual total, so no
       // food ever gives more than 35% of the plan's calories.
       // A food that gives at most 35% of the calorie minimum even at its max can
       // never break it (the total is at least that minimum), so it gets no
@@ -314,6 +365,8 @@ const Optimizer = (() => {
       variables,
       binaries,
       ints,
+      // Solver options, e.g. a time limit (only set when explaining a failed plan)
+      ...(options.options ? { options: options.options } : {}),
     };
   }
 
@@ -409,6 +462,12 @@ const Optimizer = (() => {
     const macroKcalShare = {};
     for (const m of Object.keys(macroKcal)) macroKcalShare[m] = macroKcalTotal > 0 ? macroKcal[m] / macroKcalTotal : 0;
 
+    // The split to compare with the goal: each macro's share of protein + carbs + fat
+    // (without fibre, like the goal), so these three add up to 100%
+    const splitTotal = macroKcal.protein + macroKcal.carbs + macroKcal.fat;
+    const macroSplit = {};
+    for (const m of Object.keys(MACRO_KCAL)) macroSplit[m] = splitTotal > 0 ? macroKcal[m] / splitTotal : 0;
+
     // Shares as fractions (0–1) of total protein and total kcal
     const proteinShare = {};
     const kcalShare = {};
@@ -445,6 +504,7 @@ const Optimizer = (() => {
         macroKcal,
         macroKcalTotal,
         macroKcalShare,
+        macroSplit,
       },
     };
   }
@@ -460,15 +520,90 @@ const Optimizer = (() => {
     return solve(buildModel(settings, foods, { skip: [rule] })).feasible;
   }
 
+  // Which macro can't be met? Returns one problem per macro, e.g.
+  //   { code: "carbs", macro: "carbs", side: "min", message: "Carbs can't reach 172 g (…): add …" }.
+  // Two passes, each with its own rules:
+  //   1. Only the foods, their limits and the calorie target: can the macro get there at all?
+  //   2. If every macro passes, all the plan's rules except this macro's own range: if
+  //      leaving out just this range makes a plan possible, this macro is what blocks it.
+  // options are the model options of the plan being explained (e.g. realistic and groups).
+  function macroProblems(settings, foods, help, options = {}) {
+    const goals = macroGoals(settings);
+    const macros = Object.keys(goals);
+    const foodsOnly = ["kcalMin", "protein", "carbs", "fat", "excellent", "variety", "fiber", "satFat"];
+    const userLimits = "userLimits" in help ? help.userLimits : settings.limits;
+    const maxHint = ownMaxHint(userLimits, foods);
+
+    // The highest or lowest this macro can be; null if the rules can't be kept at all
+    const reach = (macro, opType, skip) => bestValue(settings, foods, { ...options, optimize: macro, opType, skip });
+
+    // A message for a macro that's outside its range; what to do depends on the side
+    const problemFor = (macro, side, value) => {
+      const label = MACRO_LABELS[macro];
+      const fix = "raise the max limits";
+      if (side === "min") {
+        const ideas = suggestForMacro(help.catalog, foods, macro, help.usable);
+        const target = Math.round(goals[macro].min);
+        return {
+          code: macro,
+          macro,
+          side,
+          value,
+          message:
+            `${label} can't reach ${target} g (at most ${Math.floor(value)} g with these foods): ` +
+            (ideas ? `add ${ideas}, or ${fix}.` : `${fix}, or lower its %.`) + maxHint,
+        };
+      }
+      const others = macros.filter((m) => m !== macro).map((m) => MACRO_LABELS[m].toLowerCase()).join(" or ");
+      return {
+        code: macro,
+        macro,
+        side,
+        value,
+        message:
+          `${label} can't stay under ${Math.floor(goals[macro].max)} g (at least ${Math.ceil(value)} g with these foods): ` +
+          `add foods with more ${others} and less ${label.toLowerCase()}, lower the min limits, or raise its %.`,
+      };
+    };
+
+    // Pass 1: the highest within the calorie target, the lowest at the calorie minimum
+    const problems = [];
+    for (const macro of macros) {
+      const highest = reach(macro, "max", foodsOnly);
+      if (highest !== null && highest < goals[macro].min) {
+        problems.push(problemFor(macro, "min", highest));
+        continue;
+      }
+      const lowest = reach(macro, "min", foodsOnly.filter((rule) => rule !== "kcalMin"));
+      if (lowest !== null && lowest > goals[macro].max) problems.push(problemFor(macro, "max", lowest));
+    }
+    if (problems.length > 0) return problems;
+
+    // Pass 2: all the plan's rules except this macro's range
+    for (const macro of macros) {
+      const highest = reach(macro, "max", [macro]);
+      if (highest === null) continue; // still impossible, so this macro isn't the only cause
+      if (highest < goals[macro].min) {
+        problems.push(problemFor(macro, "min", highest));
+        continue;
+      }
+      const lowest = reach(macro, "min", [macro]);
+      if (lowest !== null && lowest > goals[macro].max) problems.push(problemFor(macro, "max", lowest));
+    }
+    return problems;
+  }
+
   // The plan has no solution: work out why, in words (PLAN.md section 5).
   // Every message says what to change. help (optional):
   //   catalog    – every food in foods.json, to suggest foods that aren't in My foods yet
   //   userLimits – the user's own min/max ({ id: { min?, max? } }), to point at them
+  //   usable     – leaves out foods that can't help this plan from the macro suggestions
   // Returns a list of { code, message, ... }, most useful first.
   function diagnose(settings, foods, help = {}) {
     const rules = rulesFrom(settings);
     const kcalTarget = settings.kcal;
     const kcalMin = kcalTarget * rules.kcalLowFactor;
+    const goals = macroGoals(settings);
     const problems = [];
     const pct = (share) => Math.round(share * 100);
     const userLimits = "userLimits" in help ? help.userLimits : settings.limits;
@@ -477,17 +612,17 @@ const Optimizer = (() => {
     const excellentIdeas = suggestFoods(help.catalog, foods, (f) => proteinRating(f) === "excellent");
     const notPoorIdeas = suggestFoods(help.catalog, foods, (f) => proteinRating(f) !== "poor");
 
-    // Only the foods and their limits, no protein-quality or variety rules
-    const basicSkip = ["kcalMin", "protein", "excellent", "poor", "variety"];
+    // Only the foods and their limits, no macro, quality or variety rules
+    const basicSkip = ["kcalMin", "protein", "carbs", "fat", "excellent", "variety", "fiber", "satFat"];
 
     // 1. Excellent share: even using every Excellent food up to its max,
-    //    is there enough Excellent protein for 60% of the protein target?
+    //    is there enough Excellent protein for 60% of the lowest protein allowed?
     const excellentFoods = foods.filter((f) => proteinRating(f) === "excellent");
     const maxExcellentProtein = excellentFoods.length
       ? bestValue(settings, excellentFoods, { optimize: "protein", opType: "max", skip: basicSkip }) || 0
       : 0;
     if (
-      maxExcellentProtein < rules.excellentProteinShare * settings.protein ||
+      maxExcellentProtein < rules.excellentProteinShare * goals.protein.min ||
       feasibleWithout(settings, foods, "excellent")
     ) {
       problems.push({
@@ -502,31 +637,41 @@ const Optimizer = (() => {
       });
     }
 
-    // 2. Poor calorie cap: can the non-Poor foods cover the other 60% of the calories?
-    const nonPoorFoods = foods.filter((f) => proteinRating(f) !== "poor");
-    const maxNonPoorKcal = nonPoorFoods.length
-      ? bestValue(settings, nonPoorFoods, { optimize: "kcal", opType: "max", skip: basicSkip }) || 0
-      : 0;
-    if (
-      maxNonPoorKcal < (1 - rules.poorKcalShare) * kcalMin ||
-      feasibleWithout(settings, foods, "poor")
-    ) {
+    // 2. Plan 3's fibre rule: can these foods reach it within the calorie target?
+    if (rules.minFiberPerDay > 0) {
+      const maxFiber = bestValue(settings, foods, { optimize: "fiber", opType: "max", skip: basicSkip });
+      if ((maxFiber !== null && maxFiber < rules.minFiberPerDay) || feasibleWithout(settings, foods, "fiber")) {
+        const isFibreSource = (f) => fiberRating(f) === "high";
+        const ideas = suggestFoods(help.catalog, foods, isFibreSource, "fiberPer100g");
+        problems.push({
+          code: "fiber",
+          message:
+            `Fibre can't reach ${rules.minFiberPerDay} g a day: ` +
+            (ideas ? `add high-fibre foods like ${ideas}, or raise the max limits.` : "raise the max limits of your high-fibre foods.") +
+            maxHint,
+        });
+      }
+    }
+
+    // 3. Plan 3's saturated fat rule: is it what blocks the plan?
+    if (rules.maxSaturatedFatShare < 1 && feasibleWithout(settings, foods, "satFat")) {
+      const isLowSat = (f) => f.fatPer100g >= 10 && f.saturatedFatPer100g <= f.fatPer100g * rules.maxSaturatedFatShare;
+      const ideas = suggestFoods(help.catalog, foods, isLowSat, "fatPer100g");
       problems.push({
-        code: "poor",
+        code: "satFat",
         message:
-          `Too many of your calories would have to come from Poor protein foods ` +
-          `(at most ${pct(rules.poorKcalShare)}% is allowed). ` +
-          (notPoorIdeas
-            ? `Add Excellent or OK foods like ${notPoorIdeas}, or raise their max limits.`
-            : `Raise the max limits of your Excellent and OK foods.`) +
-          maxHint,
+          `Saturated fat can't stay at or under ${pct(rules.maxSaturatedFatShare)}% of your fat: ` +
+          (ideas ? `add foods with unsaturated fat like ${ideas}, ` : "") +
+          `or use less of your foods marked ⚠ Sat. fat.`,
       });
     }
 
-    // 3. Protein: the most protein the ticked foods can give within the calorie target
-    const maxProtein = bestValue(settings, foods, { optimize: "protein", opType: "max", skip: basicSkip });
-    if (maxProtein === null) {
-      // Even the minimum amounts the user set are over the calorie target
+    // 4. Macros: which of protein, carbs and fat can't be met (and which foods would help)
+    problems.push(...macroProblems(settings, foods, { ...help, userLimits }));
+
+    // 5. Even the minimum amounts the user set are over the calorie target
+    // (This asks for the most protein: the solver ignores the kcal limit when asked for the most kcal)
+    if (bestValue(settings, foods, { optimize: "protein", opType: "max", skip: basicSkip }) === null) {
       const minNames = ownLimitNames(userLimits, foods, "min");
       problems.push({
         code: "minimums",
@@ -534,22 +679,10 @@ const Optimizer = (() => {
           `Your minimum amounts alone are more than ${kcalTarget} kcal. ` +
           `Lower the min limits${minNames ? ` of ${minNames}` : ""} in My foods, or raise your daily calories.`,
       });
-    } else if (maxProtein < settings.protein) {
-      problems.push({
-        code: "protein",
-        maxProtein,
-        message:
-          `With these foods you can reach at most ${Math.floor(maxProtein)} g protein within ` +
-          `${kcalTarget} kcal. ` +
-          (excellentIdeas
-            ? `Add high-protein foods like ${excellentIdeas}, or raise the max limits.`
-            : `Raise the max limits, or lower your protein target.`) +
-          maxHint,
-      });
     }
 
-    // 4. Calories: the most kcal the ticked foods can give at their max limits
-    // (still capped at the target, which is fine: we only care if it's below the minimum)
+    // 6. Calories: the most kcal the ticked foods can give at their max limits
+    // (it can come out above the target, which is fine: we only care if it's below the minimum)
     const maxKcal = bestValue(settings, foods, { optimize: "kcal", opType: "max", skip: basicSkip });
     if (maxKcal !== null && maxKcal < kcalMin) {
       problems.push({
@@ -561,7 +694,7 @@ const Optimizer = (() => {
       });
     }
 
-    // 5. Variety: is the 35% per-food cap the thing that blocks it?
+    // 7. Variety: is the 35% per-food cap the thing that blocks it?
     if (problems.length === 0 && feasibleWithout(settings, foods, "variety")) {
       problems.push({
         code: "variety",
@@ -573,7 +706,7 @@ const Optimizer = (() => {
       });
     }
 
-    // 6. Nothing above explains it on its own: it's the rules together
+    // 8. Nothing above explains it on its own: it's the rules together
     if (problems.length === 0) {
       problems.push({
         code: "combined",
@@ -593,8 +726,8 @@ const Optimizer = (() => {
     const ideas = suggestFoods(catalog, foods, (f) => proteinRating(f) === "excellent");
     const budget = `raise the budget to at least ${Math.round(result.totals.shoppingCost)} kr`;
     return ideas
-      ? ` To fit, ${budget}, lower your protein or calorie target, or try adding cheap protein foods like ${ideas}.`
-      : ` To fit, ${budget}, or lower your protein or calorie target.`;
+      ? ` To fit, ${budget}, lower your calorie target, or try adding cheap protein foods like ${ideas}.`
+      : ` To fit, ${budget}, or lower your calorie target.`;
   }
 
   // The whole job: cheapest plan for these settings and ticked foods.
@@ -809,12 +942,15 @@ const Optimizer = (() => {
     });
   }
 
-  // How many choices of foods solvePacks tries at most (step 4)
+  // How many choices of foods solvePacks tries at most (step 4). With tight macro ranges a
+  // choice can have no whole-pack answer, so it keeps looking for longer while nothing is found.
   const MAX_FOOD_CHOICES = 3;
+  const MAX_FOOD_CHOICES_IF_NONE_FOUND = 6;
   // Time limits for the solver's own branch and bound, in ms. Only a safety net:
   // normally each run takes a few to a few dozen ms.
   const CHOOSE_TIMEOUT = 1500;
   const FIXED_FOODS_TIMEOUT = 300;
+  const DIAGNOSE_TIMEOUT = 300;
 
   // Plans 2 and 3: the plan in whole packages per month (see the steps above).
   // Returns an answer like solve() does: { feasible, result, food_<id>: packages, ... }
@@ -836,7 +972,7 @@ const Optimizer = (() => {
     const choose = { ...model, ints: {}, constraints: { ...model.constraints }, variables: { ...model.variables },
       options: { timeout: CHOOSE_TIMEOUT } };
 
-    for (let choice = 0; choice < MAX_FOOD_CHOICES; choice++) {
+    for (let choice = 0; choice < (best ? MAX_FOOD_CHOICES : MAX_FOOD_CHOICES_IF_NONE_FOUND); choice++) {
       // 1. Choose the foods. No answer: no (other) choice of foods works.
       const chosen = solve(choose);
       if (!chosen.feasible) break;
@@ -858,6 +994,12 @@ const Optimizer = (() => {
       }
       // 2b. Step 1's answer rounded to whole packs, then repaired. 3. Both get cheaper in packSearch.
       consider(roundPacks(problem, problem.items.map((item) => chosen[item.name] || 0)));
+      // Nothing found yet: also try starting with every amount rounded down, and rounded up
+      if (!best) {
+        const amounts = problem.items.map((item) => chosen[item.name] || 0);
+        consider(roundPacks(problem, amounts.map(Math.floor)));
+        consider(roundPacks(problem, amounts.map(Math.ceil)));
+      }
 
       // 4. Next time, not exactly these foods: Σ used (these) − Σ used (others) ≤ count − 1
       const rule = "notChoice_" + choice;
@@ -881,30 +1023,38 @@ const Optimizer = (() => {
   const PLAN_TITLES = {
     cheapest: "Absolute cheapest",
     realistic: "Cheapest realistic",
-    highQuality: "High quality",
+    highQuality: "Same macros, higher quality",
   };
 
   // A "no plan" answer with one or more { code, message } problems
   const noPlan = (problems) => ({ status: "infeasible", problems, messages: problems.map((p) => p.message) });
 
   // Settings and solver options for plan 2 ("realistic") or plan 3 ("highQuality").
-  // Both use the realistic rules and the group limits. They differ in the protein
-  // minimum (+5 g or +20 g) and, for plan 3, an 80% Excellent share instead of 60%.
+  // Both use the realistic rules and the group limits, and the same macro ranges.
+  // Plan 3 adds its quality rules: 80% Excellent, enough fibre, limited saturated fat.
   function realisticSetup(settings, groups, which) {
     const rules = rulesFrom(settings);
-    if (which === "highQuality") {
-      return {
-        settings: { ...settings, rules: { ...(settings.rules || {}), excellentProteinShare: rules.highQualityExcellentShare } },
-        options: { realistic: true, packs: true, groups, proteinMin: settings.protein + rules.highQualityProteinExtra },
-      };
-    }
-    return { settings, options: { realistic: true, packs: true, groups, proteinMin: settings.protein + rules.proteinBuffer } };
+    const options = { realistic: true, packs: true, groups };
+    if (which !== "highQuality") return { settings, options };
+    return {
+      settings: {
+        ...settings,
+        rules: {
+          ...(settings.rules || {}),
+          excellentProteinShare: rules.highQualityExcellentShare,
+          minFiberPerDay: rules.highQualityMinFiber,
+          maxSaturatedFatShare: rules.highQualitySaturatedFatShare,
+        },
+      },
+      options,
+    };
   }
 
   // Plan 2 or 3 has no solution: explain why.
-  // Runs the usual checks with that plan's targets (higher protein, realistic max
-  // limits, its Excellent share). If none of them is the cause, it's the realistic
-  // rules together (floor, 10 foods, group limits).
+  // Runs the usual checks with that plan's rules (realistic max limits, its Excellent
+  // share, plan 3's fibre and saturated fat). Then asks whether one macro is what the
+  // realistic rules block (e.g. the dry grains limit keeps carbs too low). If nothing
+  // stands out, it's the realistic rules together (floor, 10 foods, whole packs).
   function diagnoseRealistic(setup, foods, catalog = []) {
     const rules = rulesFrom(setup.settings);
     const problems = [];
@@ -930,17 +1080,27 @@ const Optimizer = (() => {
       });
     }
 
-    // The usual checks, with this plan's protein target and realistic max limits
+    // Only suggest foods that can be in this plan: a food whose one pack lasts longer
+    // than the period at its max per day can't be (e.g. a big bottle of oil over 7 days)
+    const fitsInPacks = (f) => unitLimits(f, setup.settings, true, true).max > 0;
+
+    // The usual checks, with this plan's realistic max limits
     const limits = {};
     for (const f of foods) limits[f.id] = limitsFor(f, setup.settings, true);
-    const checkSettings = { ...setup.settings, protein: setup.options.proteinMin, limits };
+    const checkSettings = { ...setup.settings, limits };
     // Those checks assume the plan fails even without the floor, 10 foods and group
     // limits, so only run them when it does. "variety" and "combined" are guesses
     // made without the realistic rules, so leave them out.
     if (!solve(buildModel(checkSettings, foods)).feasible) {
       // checkSettings.limits holds every food's realistic limits, so pass the user's own ones separately
-      const found = diagnose(checkSettings, foods, { catalog, userLimits });
+      const found = diagnose(checkSettings, foods, { catalog, userLimits, usable: fitsInPacks });
       problems.push(...found.filter((p) => p.code !== "variety" && p.code !== "combined"));
+    }
+
+    // Does one macro stand out once the realistic rules count (in grams, not packs yet)?
+    if (problems.length === 0) {
+      const inGrams = { realistic: true, groups: setup.options.groups, options: { timeout: DIAGNOSE_TIMEOUT } };
+      problems.push(...macroProblems(checkSettings, foods, { catalog, userLimits, usable: fitsInPacks }, inGrams));
     }
 
     if (problems.length === 0) {
@@ -949,7 +1109,7 @@ const Optimizer = (() => {
         message:
           `The realistic rules (at least ${rules.minFoods} different foods, at least ${rules.minGramsIfUsed} g ` +
           `of each food you eat, whole packages, realistic max amounts and food-group limits) can't all be met with these ` +
-          `foods at ${Math.round(setup.options.proteinMin)} g protein. ` +
+          `foods and macro goals. ` +
           `Add a few more foods` + (anyIdeas ? `, e.g. ${anyIdeas}.` : ".") +
           ownMaxHint(userLimits, foods),
       });
@@ -980,9 +1140,10 @@ const Optimizer = (() => {
     return result;
   }
 
-  // Plan 3 "High quality": the cheapest plan with protein ≥ minimum + 20 g and at
-  // least 80% of it from Excellent foods, with the realistic rules. The budget is
-  // a ceiling: if the plan costs more, there is no plan (but we say what it would cost).
+  // Plan 3 "Same macros, higher quality": the cheapest plan with the same macro ranges
+  // and realistic rules, at least 80% of the protein from Excellent foods, enough fibre
+  // and limited saturated fat. The budget is a ceiling: if the plan costs more, there
+  // is no plan (but we say what it would cost).
   // Needs plan 2's answer: if even the cheapest realistic plan doesn't fit, nothing does.
   function planHighQuality(settings, foods, groups, realistic, catalog = []) {
     // Plan 2 had no solution: plan 3 can't have one either (same rules, stricter targets)
@@ -1004,12 +1165,12 @@ const Optimizer = (() => {
 
     const setup = realisticSetup(settings, groups, "highQuality");
 
-    // Does a high quality plan exist at all?
+    // Does a higher quality plan exist at all?
     const answer = solvePacks(setup.settings, foods, setup.options);
     if (!answer.feasible) return noPlan(diagnoseRealistic(setup, foods, catalog));
 
     // Whole packages cost exactly what the solver says, and this is the cheapest
-    // high quality plan, so the budget ceiling is simply: does this one fit?
+    // higher quality plan, so the budget ceiling is simply: does this one fit?
     const result = summarise(settings, foods, gramsFrom(answer, foods, settings.days));
 
     // Over budget: no plan, but say what it would cost
@@ -1020,7 +1181,7 @@ const Optimizer = (() => {
           code: "budget",
           cost,
           message:
-            `The high quality plan costs ${Math.round(cost)} kr, which is ` +
+            `The higher quality plan costs ${Math.round(cost)} kr, which is ` +
             `${Math.round(cost - settings.budget)} kr over your budget of ${Math.round(settings.budget)} kr. ` +
             `Raise the budget to at least ${Math.round(cost)} kr, or use the Cheapest realistic plan, which fits.`,
         },
@@ -1044,7 +1205,7 @@ const Optimizer = (() => {
     const highQuality = planHighQuality(settings, foods, groups, realistic, catalog);
 
     // The whole-package search finds a very cheap plan, not always the cheapest one.
-    // A high quality plan also keeps every rule of plan 2, so if it came out cheaper,
+    // A higher quality plan also keeps every rule of plan 2, so if it came out cheaper,
     // it's plan 2's answer too (and the cost order plan 2 ≤ plan 3 holds).
     if (highQuality.status === "optimal" && highQuality.totals.shoppingCost < realistic.totals.shoppingCost) {
       const grams = {};
@@ -1062,6 +1223,7 @@ const Optimizer = (() => {
 
   // What other files can use
   return {
-    DEFAULT_RULES, PLAN_TITLES, proteinRating, fiberRating, nutrientWarnings, buildModel, solve, plan, planAll,
+    DEFAULT_RULES, PLAN_TITLES, proteinRating, fiberRating, nutrientWarnings, macroGoals, macroSplitProblem,
+    buildModel, solve, plan, planAll,
   };
 })();

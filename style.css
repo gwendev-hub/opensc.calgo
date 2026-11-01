@@ -88,6 +88,48 @@ input[type="number"]:focus {
   outline-offset: 1px;
 }
 
+/* Macro split on the Settings tab: presets, then a % and grams field per macro */
+.macro-split {
+  margin: 16px 0 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.macro-split legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+.preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.preset-buttons button {
+  flex: 1 1 140px;
+  min-height: 44px;
+}
+.preset-buttons button[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  font-weight: 700;
+}
+.macro-grid {
+  display: grid;
+  grid-template-columns: 4em 1fr 1fr;
+  gap: 6px 8px;
+  align-items: center;
+  margin: 10px 0 8px;
+}
+.macro-grid label,
+.macro-grid input {
+  margin-top: 0;
+}
+.macro-grid-head {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 /* Small explanatory text under a card heading */
 .hint {
   color: var(--muted);
@@ -692,6 +734,20 @@ button.secondary {
   font-weight: 700;
   border-bottom: none;
 }
+
+/* Goal vs actual table: green when a macro is inside its range, yellow when it isn't */
+.macro-goals {
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+}
+.macro-goals .goal-range { font-size: 0.8rem; }
+/* Long headers wrap, so the five columns fit on a narrow phone */
+.macro-goals thead .num { white-space: normal; }
+.macro-goals + .hint { margin-bottom: 12px; }
+.macro-goals .goal-in .actual-grams  { color: #1d6b3a; font-weight: 700; }
+.macro-goals .goal-out .actual-grams { color: #8a6500; font-weight: 700; }
 
 /* Colour square in front of each macro name */
 .macro-table .swatch {

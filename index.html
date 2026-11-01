@@ -12,12 +12,12 @@
     <!-- Page title and one-line explanation -->
     <header>
       <h1>Protein Budget Planner</h1>
-      <p class="subtitle">The cheapest monthly grocery list that hits your protein and calorie targets.</p>
+      <p class="subtitle">The cheapest monthly grocery list that hits your calorie and macro goals.</p>
     </header>
 
     <!-- ===== Tab 1: Settings ===== -->
     <div id="panel-settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-settings">
-      <!-- Settings card: the four numbers the optimizer will use -->
+      <!-- Settings card: the numbers the optimizer will use -->
       <section class="card" aria-labelledby="settings-title">
         <h2 id="settings-title">Settings</h2>
         <form id="settings-form">
@@ -29,9 +29,36 @@
           <label for="kcal">Daily calories (kcal)</label>
           <input id="kcal" name="kcal" type="number" inputmode="numeric" min="0" step="50" value="1700">
 
-          <!-- Daily protein minimum -->
-          <label for="protein">Daily protein minimum (g)</label>
-          <input id="protein" name="protein" type="number" inputmode="numeric" min="0" step="5" value="110">
+          <!-- Macro split: a % and grams per macro. Typing either one updates the other (app.js) -->
+          <fieldset class="macro-split">
+            <legend>Macro split</legend>
+            <div class="preset-buttons" role="group" aria-label="Macro presets">
+              <button type="button" class="secondary" data-preset="30,45,25">Balanced 30/45/25</button>
+              <button type="button" class="secondary" data-preset="35,40,25">High protein 35/40/25</button>
+              <button type="button" class="secondary" data-preset="30,30,40">Lower carb 30/30/40</button>
+            </div>
+            <div class="macro-grid">
+              <span></span><span class="macro-grid-head">%</span><span class="macro-grid-head">g/day</span>
+
+              <label for="proteinPct">Protein</label>
+              <input id="proteinPct" name="proteinPct" type="number" inputmode="decimal" min="0" max="100" step="any" value="30">
+              <input id="proteinGrams" type="number" inputmode="numeric" min="0" step="any" aria-label="Protein grams per day">
+
+              <label for="carbsPct">Carbs</label>
+              <input id="carbsPct" name="carbsPct" type="number" inputmode="decimal" min="0" max="100" step="any" value="45">
+              <input id="carbsGrams" type="number" inputmode="numeric" min="0" step="any" aria-label="Carbs grams per day">
+
+              <label for="fatPct">Fat</label>
+              <input id="fatPct" name="fatPct" type="number" inputmode="decimal" min="0" max="100" step="any" value="25">
+              <input id="fatGrams" type="number" inputmode="numeric" min="0" step="any" aria-label="Fat grams per day">
+            </div>
+            <p class="hint">Grams = calories × % ÷ 4 for protein and carbs, ÷ 9 for fat.</p>
+            <p id="macro-error" class="error" role="alert"></p>
+          </fieldset>
+
+          <!-- How far each macro may be from its goal -->
+          <label for="tolerancePct">Tolerance (± % of the grams)</label>
+          <input id="tolerancePct" name="tolerancePct" type="number" inputmode="numeric" min="1" max="50" step="1" value="10">
 
           <!-- How many days the grocery list should cover -->
           <label for="days">Days in the period</label>
@@ -58,7 +85,7 @@
         </div>
 
         <p class="hint">
-          Your targets need at least <strong id="target-density">–</strong> g protein per 100 kcal
+          Your protein goal needs about <strong id="target-density">–</strong> g protein per 100 kcal
           on average across the whole plan.
           Foods with more than 10 g protein per 100 kcal <em>lift</em> your plan; the rest <em>dilute</em> it.
         </p>
