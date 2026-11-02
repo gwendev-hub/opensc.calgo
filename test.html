@@ -1690,7 +1690,7 @@
               ["a tab in the tab bar also leaves the page", page.leaveByTab === "plans" && page.gearBack],
               ["the open tab stays remembered, so a reload doesn't open App settings", page.savedTab === "macros" && page.reloadedOn === "macros"],
               ["Goals no longer holds any of it", !doc.getElementById("panel-goals").contains(card) && doc.getElementById("panel-app").contains(card)],
-              ["the data line, word for word", doc.getElementById("privacy-line").textContent === "Your data stays on this phone. Nothing is sent anywhere."],
+              ["the data line, word for word", doc.getElementById("privacy-line").textContent === "Your data stays with you, I haven't started selling it yet :)"],
               [`version ${doc.getElementById("app-version").textContent}`, /^\d+\.\d+\.\d+$/.test(doc.getElementById("app-version").textContent)],
               [`prices: "${prices}"`, sources.length > 0 && sources.every((source) => prices.includes(source))],
               ["“Not medical advice”", /Not medical advice/.test(card.textContent)],

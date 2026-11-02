@@ -61,7 +61,7 @@ A bottom tab bar on phones (moves to the top on wide screens), ≥ 44 px tap tar
 2. **Foods:** a **search bar** (tap to see every food, type to filter, ignores case and å/ä/ö, matches aliases) and **My foods**, grouped by category, with badges and kr per 100 g protein. Untick to remove. Tap a food to set your own min/max. The optimizer uses only My foods.
 3. **Plans:** three cards (cost vs budget, protein, kcal, % Excellent, number of foods). Tap one to see its **grocery list**: Food, Per day, Packs (*2 × 1 kg*, *3 × 12 eggs*), Cost, plus "X% of your protein comes from Excellent sources" and a **Copy list** button. A red dot and an "out of date" note appear when the goals or foods change.
 4. **Macros:** a plan switcher, a pie chart, and a table with grams, kcal and % for protein, carbs, fat and fibre against the goals; a daily/monthly toggle; a fibre range (fat and carbs are compared with your goals).
-5. **⚙️ App** (icon in the top corner, not a tab): appearance (System / Light / Dark), **Clear my data** (asks first, removes only `pbp.*`), "Your data stays on this phone", and About (version, price date, not medical advice, feedback link).
+5. **⚙️ App** (icon in the top corner, not a tab): appearance (System / Light / Dark), **Clear my data** (asks first, removes only `pbp.*`), "Your data stays with you, I haven't started selling it yet :)", and About (version, price date, not medical advice, feedback link).
 
 ## 6. Status
 Done: skeleton, food data, optimizer, three plans, whole packs, tabs, search, min/max, Copy list, nutrients and Macros tab, full macro goals.
