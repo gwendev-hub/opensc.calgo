@@ -1,5 +1,6 @@
 // Everything saved in localStorage starts with "pbp.":
 //   pbp.settings – the goals; pbp.myFoods – a list of food ids; pbp.tab – the last open tab;
+//   pbp.listView – the grocery list per "week" or "month";
 //   pbp.theme – the appearance; pbp.limits – own limits, e.g. { "keso": { "min": 60, "max": 120 } };
 //   pbp.ticks – only from old versions, moved to pbp.myFoods and then removed.
 //
@@ -202,6 +203,77 @@ function showClearedNote() {
   } catch (err) {
     // No note then
   }
+}
+
+// ---------- Grocery list per week or month ----------
+
+// Key of the saved choice. It's kept apart from the goals: it only changes how the
+// list is shown, so it needs no Save and doesn't make plans out of date.
+const LIST_VIEW_KEY = "pbp.listView";
+const LIST_VIEWS = ["week", "month"];
+let listView = "month";
+
+// The saved choice ("month" if there is none, it's unknown, or storage is blocked)
+function loadListView() {
+  try {
+    const saved = localStorage.getItem(LIST_VIEW_KEY);
+    return LIST_VIEWS.includes(saved) ? saved : "month";
+  } catch (err) {
+    return "month";
+  }
+}
+
+// Use a choice: mark its button and redraw the list if there is one
+function applyListView(view) {
+  listView = view;
+  for (const button of document.querySelectorAll("[data-list-view]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.listView === view));
+  }
+  if (plans) renderPlanDetail();
+}
+
+// The user chose week or month: use it and remember it
+function setListView(view) {
+  applyListView(view);
+  try {
+    localStorage.setItem(LIST_VIEW_KEY, view);
+  } catch (err) {
+    // The choice just won't be remembered
+  }
+}
+
+// How many shopping weeks a period has: 30 days is 4 weeks, not 5 with one for the last 2 days
+function weekCount(days) {
+  return Math.max(1, Math.round(days / 7));
+}
+
+// Whole packs shared as evenly as possible over the weeks, earliest weeks first: 9 over 4 → 3, 2, 2, 2.
+// Packs can't be split, so 1 pack over 4 weeks is simply bought in week 1.
+function splitEvenly(packs, weeks) {
+  const each = Math.floor(packs / weeks);
+  const extra = packs - each * weeks;
+  return Array.from({ length: weeks }, (_, week) => each + (week < extra ? 1 : 0));
+}
+
+// The plan's packages per shopping week. The plan itself doesn't change: every food's packs
+// add up to its packs for the whole period. Pantry foods (dry, canned, frozen, oil) are all
+// bought in week 1, and fresh foods are split evenly.
+// Returns one { week, rows: [{ f, item, packages, cost }], cost } per week.
+function weeklyList(plan, days) {
+  const weeks = Array.from({ length: weekCount(days) }, (_, i) => ({ week: i + 1, rows: [], cost: 0 }));
+  for (const item of plan.items) {
+    const f = foods.find((x) => x.id === item.id);
+    const shares = f.storage === "pantry"
+      ? [item.packages, ...Array(weeks.length - 1).fill(0)]
+      : splitEvenly(item.packages, weeks.length);
+    shares.forEach((packages, i) => {
+      if (packages === 0) return;
+      const cost = packages * f.packPrice;
+      weeks[i].rows.push({ f, item, packages, cost });
+      weeks[i].cost += cost;
+    });
+  }
+  return weeks;
 }
 
 // ---------- Foods ----------
@@ -798,6 +870,7 @@ async function loadFoods() {
     // The search box and the button only work once the data is here
     document.getElementById("food-search-input").disabled = false;
     document.getElementById("make-list").disabled = false;
+    document.getElementById("make-list-foods").disabled = false;
   } catch (err) {
     document.getElementById("food-list").innerHTML =
       `<p class="error">Couldn't load the food list (${err.message}). ` +
@@ -880,6 +953,17 @@ const MACRO_RANGES = {
   fiber: { min: 25, max: 35 },
 };
 
+// What to do when a plan's fibre is below the range ("" when it isn't). It names high-fibre foods
+// from foods.json that aren't in My foods yet, cheapest fibre first.
+function fibreTipText(plan) {
+  if (plan.totals.fiberPerDay >= MACRO_RANGES.fiber.min) return "";
+  const isHighFibre = (f) => Optimizer.fiberRating(f) === "high";
+  const ideas = Optimizer.suggestFoods(foods, myFoodList(), isHighFibre, "fiberPer100g");
+  return ideas
+    ? `To get more fibre, add high-fibre foods in My foods, like ${ideas}.`
+    : "All the high-fibre foods are already in My foods.";
+}
+
 // Goal vs actual for protein, carbs and fat: grams per day and % of their energy.
 // A macro is green with ✔ when its grams are inside goal ± tolerance.
 function macroGoalHtml(plan, settings) {
@@ -940,8 +1024,9 @@ function planSwitchHtml() {
 // The pie and the kcal table are shares of protein × 4 + carbs × 4 + fat × 9 + fibre × 2, so they add
 // up to 100%. That total can differ a little from the label kcal on the plan cards, and the protein %
 // by a point or two from "% of calories from protein", which divides by the label kcal.
-// Monthly = per day × days and leaves the % alone; the goal table and the fibre range stay daily.
-// Build the Macros tab for one plan: plan switcher, Daily/Monthly toggle, pie, table and ranges
+// Weekly = per day × 7 and Monthly = per day × days; both leave the % alone, and the goal table and
+// the fibre range stay daily.
+// Build the Macros tab for one plan: plan switcher, Daily/Weekly/Monthly toggle, pie, table and ranges
 function macroHtml(plan) {
   const switcher = planSwitchHtml();
 
@@ -960,8 +1045,8 @@ function macroHtml(plan) {
   const days = planSettings.days;
 
   // Daily or monthly amounts (grams and kcal); the % don't change
-  const factor = macroPeriod === "month" ? days : 1;
-  const period = macroPeriod === "month" ? `for ${num(days)} days` : "per day";
+  const factor = { day: 1, week: 7, month: days }[macroPeriod];
+  const period = { day: "per day", week: "per week (7 days)", month: `for ${num(days)} days` }[macroPeriod];
   const gramsPerDay = { protein: t.proteinPerDay, carbs: t.carbsPerDay, fat: t.fatPerDay, fiber: t.fiberPerDay };
 
   // Pie chart: a CSS conic gradient with one slice per macro (no chart library).
@@ -1002,7 +1087,7 @@ function macroHtml(plan) {
     `<button type="button" data-macro-period="${value}" aria-pressed="${macroPeriod === value}">${label}</button>`;
   const toggle = `
     <div class="toggle" role="group" aria-label="Show amounts">
-      ${toggleButton("day", "Daily")}${toggleButton("month", "Monthly")}
+      ${toggleButton("day", "Daily")}${toggleButton("week", "Weekly")}${toggleButton("month", "Monthly")}
     </div>`;
 
   // The ranges always use daily values and shares
@@ -1010,6 +1095,13 @@ function macroHtml(plan) {
     <ul class="ranges">
       ${rangeRowHtml("Fibre", t.fiberPerDay, MACRO_RANGES.fiber, `${num(t.fiberPerDay)} g/day`, "25–35 g")}
     </ul>`;
+
+  // A tip with a way to act on it, only when fibre is too low
+  const fibreTip = fibreTipText(plan);
+  const fibreHelp = fibreTip
+    ? `<p class="fibre-tip">${esc(fibreTip)}</p>
+       <button type="button" class="secondary" data-go-tab="foods">Go to My foods</button>`
+    : "";
 
   return `
     <h2>Macros</h2>
@@ -1019,7 +1111,8 @@ function macroHtml(plan) {
     ${toggle}
     <div class="macro-row">${pie}${table}</div>
     <p class="hint">The plan card's ${num(t.kcalPerDay)} kcal/day comes from the food labels, so it can differ a little from this total.</p>
-    ${ranges}`;
+    ${ranges}
+    ${fibreHelp}`;
 }
 
 // Draw the Macros tab for the selected plan
@@ -1041,6 +1134,34 @@ function packSize(f) {
 const packsText = (item, f) => `${item.packages} × ${packSize(f)}`;
 
 // Deliberately nothing about leftovers from rounding up to whole packs: that was taken off the list.
+// The grocery list per shopping week: one small table per week, with what that week costs
+function weeklyListHtml(plan) {
+  const weeks = weeklyList(plan, planSettings.days);
+  const sections = weeks.map(({ week, rows, cost }) => {
+    const body = rows.map((r) => `
+        <tr data-id="${r.f.id}">
+          <td>${esc(r.item.name)}${proteinBadgeHtml(r.item.rating)}</td>
+          <td class="num packs">${packsText({ packages: r.packages }, r.f)}</td>
+          <td class="num">${num(r.cost)} kr</td>
+        </tr>`).join("");
+    const table = rows.length
+      ? `<table class="grocery">
+          <thead><tr><th scope="col">Food</th><th scope="col" class="num">Packs</th><th scope="col" class="num">Cost</th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>`
+      : '<p class="week-empty">Nothing to buy this week.</p>';
+    return `
+      <section class="grocery-week" data-week="${week}">
+        <h3 class="week-title"><span>Week ${week}</span><span class="week-cost">${num(cost)} kr</span></h3>
+        ${table}
+      </section>`;
+  }).join("");
+  return `
+    <p class="hint">Pantry foods (dry, canned, frozen, oil) are bought in week 1. Fresh foods are split evenly over ${weeks.length} ${weeks.length === 1 ? "week" : "weeks"}.</p>
+    ${sections}
+    <p class="top-line week-total"><strong>Total for ${num(planSettings.days)} days: ${num(plan.totals.shoppingCost)} kr</strong></p>`;
+}
+
 // Build the grocery table for one plan: food (with its badge), grams per day, packs, cost
 function groceryTableHtml(plan) {
   const rows = plan.items
@@ -1083,24 +1204,39 @@ function shortName(f) {
 //
 //   Total: 1,352 kr (budget 4,000 kr)
 //   Per day: 115 g protein · 1,690 kcal
-function copyListText(plan, days) {
-  const lines = [`${plan.title} – ${num(days)} days`];
+// With view "week" each week gets a "Week 1 – 650 kr" heading above its own categories.
+function copyListText(plan, days, view = "month") {
+  const lines = [`${plan.title} – ${num(days)} days${view === "week" ? ", week by week" : ""}`];
 
-  // Group the items by category, in the category order of foods.json
-  const byCategory = new Map();
-  for (const f of foods) {
-    const item = plan.items.find((i) => i.id === f.id);
-    if (!item) continue;
-    if (!byCategory.has(f.category)) byCategory.set(f.category, []);
-    byCategory.get(f.category).push({ f, item });
-  }
-
-  // One line per food: name, packs in the same style as the Packs column, cost
-  for (const [category, rows] of byCategory) {
-    lines.push("", category);
-    for (const { f, item } of rows) {
-      lines.push(`${shortName(f)} – ${packsText(item, f)} – ${num(item.cost)} kr`);
+  // Lines for some foods, grouped by category, in the category order of foods.json.
+  // One line per food: name, packs in the same style as the Packs column, cost.
+  const addRows = (rows) => {
+    const byCategory = new Map();
+    for (const f of foods) {
+      const row = rows.find((r) => r.f.id === f.id);
+      if (!row) continue;
+      if (!byCategory.has(f.category)) byCategory.set(f.category, []);
+      byCategory.get(f.category).push(row);
     }
+    for (const [category, group] of byCategory) {
+      lines.push("", category);
+      for (const r of group) {
+        lines.push(`${shortName(r.f)} – ${packsText({ packages: r.packages }, r.f)} – ${num(r.cost)} kr`);
+      }
+    }
+  };
+
+  if (view === "week") {
+    for (const { week, rows, cost } of weeklyList(plan, days)) {
+      lines.push("", `Week ${week} – ${num(cost)} kr`);
+      addRows(rows);
+    }
+  } else {
+    addRows(plan.items.map((item) => ({
+      f: foods.find((f) => f.id === item.id),
+      packages: item.packages,
+      cost: item.cost,
+    })));
   }
 
   // Totals at the bottom
@@ -1144,7 +1280,7 @@ async function copyText(text) {
 // "Copy list" was tapped: copy the selected plan and say "Copied ✓" for a moment.
 // If copying isn't possible, show the text so it can be selected by hand.
 async function copyList(button) {
-  const text = copyListText(plans[selectedPlan], planSettings.days);
+  const text = copyListText(plans[selectedPlan], planSettings.days, listView);
   const fallback = document.getElementById("copy-fallback");
   if (await copyText(text)) {
     button.textContent = "Copied ✓";
@@ -1180,13 +1316,13 @@ function renderPlanDetail() {
     <h2>${esc(plan.title)}</h2>
     <p class="top-line"><strong>Total ${costLine(plan)}</strong> · <strong>${num(t.proteinPerDay)} g protein/day</strong> · <strong>${num(t.kcalPerDay)} kcal/day</strong></p>
     ${messages}
-    ${groceryTableHtml(plan)}
+    ${listView === "week" ? weeklyListHtml(plan) : groceryTableHtml(plan)}
     <button type="button" class="secondary copy-list" data-copy-list>Copy list</button>
     <textarea id="copy-fallback" class="copy-fallback" readonly rows="8" hidden></textarea>
     ${proteinQualityHtml(plan)}`;
 }
 
-// Draw the three cards and the selected plan's list (Plans tab), and its macros (Macros tab)
+// Draw the three cards and the selected plan's list (My List tab), and its macros (Macros tab)
 function renderPlans() {
   document.getElementById("plan-cards").innerHTML = PLAN_ORDER.map((key) => planCardHtml(plans[key])).join("");
   renderPlanDetail();
@@ -1266,7 +1402,7 @@ function selectPlan(key) {
 }
 
 // Settings or My foods changed after a list was made: show the "out of date"
-// note on the Plans tab and a dot on the Plans tab button
+// note on the My List tab and a dot on its tab button
 function markPlansStale() {
   if (!plans) return;
   document.getElementById("plans-stale").hidden = false;
@@ -1297,7 +1433,7 @@ let tabBeforeApp = "goals";
 function loadTab() {
   try {
     const saved = localStorage.getItem(TAB_KEY);
-    // The old List tab is now part of Plans
+    // The old List tab is now part of My List (saved as "plans", its name before)
     if (saved === "list") return "plans";
     return TABS.includes(saved) ? saved : "goals";
   } catch (err) {
@@ -1384,7 +1520,7 @@ function goalsChanged() {
   markPlansStale();
 }
 
-// "Create my grocery list →": open Plans and make the plans
+// "Create my grocery list →": open My List and make the plans
 async function createList() {
   showTab("plans", { toTop: true });
   await makeGroceryList();
@@ -1483,6 +1619,16 @@ function init() {
   // "Create my grocery list →" after a save
   document.getElementById("create-list").addEventListener("click", createList);
 
+  // Week / Month switch at the top of My List: it only changes the display, so it isn't a goal
+  document.getElementById("panel-plans").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-list-view]");
+    if (button) setListView(button.dataset.listView);
+  });
+  applyListView(loadListView());
+
+  // "Make my grocery list" at the bottom of My foods does the same as the Create button
+  document.getElementById("make-list-foods").addEventListener("click", createList);
+
   // A food in My foods was unticked: remove it from My foods
   document.getElementById("food-list").addEventListener("change", (event) => {
     const box = event.target;
@@ -1532,7 +1678,7 @@ function init() {
   });
 
   // Macros tab: the plan switcher selects another plan (and stays on Macros);
-  // the Daily / Monthly toggle redraws the section with the new period
+  // the Daily / Weekly / Monthly toggle redraws the section with the new period
   document.getElementById("macro-section").addEventListener("click", (event) => {
     const planButton = event.target.closest("[data-macro-plan]");
     if (planButton) {
@@ -1551,7 +1697,7 @@ function init() {
     if (tab) showTab(tab.dataset.tab);
   });
 
-  // Buttons like "Go to Plans" that jump to another tab
+  // Buttons like "Go to My List" that jump to another tab
   document.addEventListener("click", (event) => {
     const link = event.target.closest("[data-go-tab]");
     if (link) showTab(link.dataset.goTab, { toTop: true });

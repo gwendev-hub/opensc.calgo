@@ -741,10 +741,10 @@
         title: "Main page: tabs, plan cards and grocery list",
         expected:
           "Four tabs (no separate List tab), each showing only its own panel. With default settings and every food in My foods, " +
-          "the button on the Plans tab shows 3 cards (Cheapest realistic selected) with the selected plan's grocery list and " +
+          "the button on the My List tab shows 3 cards (Cheapest realistic selected) with the selected plan's grocery list and " +
           "protein quality below them on the same tab (no macros: they have their own tab); tapping a card selects it, shows " +
-          "its list and stays on Plans; the open tab is remembered (an old saved \"list\" tab opens Plans); changing a setting " +
-          "shows a dot on Plans and the 'out of date' note",
+          "its list and stays on My List; the open tab is remembered (an old saved \"list\" tab opens My List); changing a setting " +
+          "shows a dot on My List and the 'out of date' note",
         async run(app) {
           const page = await pagePlansOnce(app);
           const three = scenarios.three();
@@ -754,7 +754,7 @@
               [`tapping each tab shows only its panel: ${page.tabsShown.join(", ")}`, page.tabsShown.join() === "goals,foods,plans,macros"],
               ["there is no List tab or panel any more", !page.hasListTab],
               ["tab bar buttons are at least 44 px tall", page.tabHeights.every((h) => h >= 44)],
-              [`still on the Plans tab after pressing the button (open: ${page.tabAfterRun})`, page.tabAfterRun === "plans"],
+              [`still on the My List tab after pressing the button (open: ${page.tabAfterRun})`, page.tabAfterRun === "plans"],
               [`cards: ${page.cards.join(", ")}`, page.cards.join() === THREE.join()],
               [`selected by default: ${page.selectedAtStart}`, page.selectedAtStart === "realistic"],
               [`each card shows cost vs budget, protein, kcal, % Excellent and food count`, page.cardsHaveStats],
@@ -764,17 +764,17 @@
                 page.first.badges === three.realistic.items.filter((i) => i.rating === "excellent").length],
               [`total shown: ${page.first.total}`, page.first.total === `${Math.round(three.realistic.totals.shoppingCost).toLocaleString("en-GB")} kr`],
               ["protein quality section says how much is from Excellent", /Protein quality/.test(page.first.text) && Boolean(page.first.proteinShare)],
-              ["the grocery list is on the Plans tab, below the cards", page.listUnderCards],
-              ["the Plans tab has no macro pie, table or toggle", !page.first.hasMacros && !page.afterTap.hasMacros],
+              ["the grocery list is on the My List tab, below the cards", page.listUnderCards],
+              ["the My List tab has no macro pie, table or toggle", !page.first.hasMacros && !page.afterTap.hasMacros],
               [`after tapping Absolute cheapest: "${page.afterTap.heading}", ${page.afterTap.rows} foods`,
                 page.afterTap.heading === "Absolute cheapest" && rowsOk("cheapest", page.afterTap.rows)],
               ["tapped card is now the selected one", page.afterTap.selected === "cheapest"],
-              [`tapping the card stays on the Plans tab (open: ${page.afterTap.tab})`, page.afterTap.tab === "plans"],
+              [`tapping the card stays on the My List tab (open: ${page.afterTap.tab})`, page.afterTap.tab === "plans"],
               [`open tab remembered in localStorage ("${page.afterTap.savedTab}")`, page.afterTap.savedTab === "plans"],
-              [`an old saved "list" tab opens Plans (got "${page.oldListTab}")`, page.oldListTab === "plans"],
+              [`an old saved "list" tab opens My List (got "${page.oldListTab}")`, page.oldListTab === "plans"],
               [`an old saved "settings" tab opens Goals (got "${page.oldSettingsTab}")`, page.oldSettingsTab === "goals"],
               ["no 'out of date' dot before any change", !page.dotBefore],
-              ["changing a setting shows the dot on the Plans tab", page.dotAfter],
+              ["changing a setting shows the dot on the My List tab", page.dotAfter],
               ["changing a setting shows the 'out of date' note", page.staleShown],
             ],
             notes: ["Runs on the real index.html in a hidden frame; your own saved settings, ticks and open tab are put back afterwards."],
@@ -861,7 +861,7 @@
         title: "Macro view on the Macros tab",
         expected:
           "Pie of protein / carbs / fat / fibre (% of kcal, adds up to 100%); a table with grams, kcal (protein ×4, carbs ×4, " +
-          "fat ×9, fibre ×2) and % of kcal, plus a total kcal row; the Monthly toggle shows grams and kcal × days; " +
+          "fat ×9, fibre ×2) and % of kcal, plus a total kcal row; Weekly shows grams and kcal × 7 and Monthly × days; " +
           "fibre vs 25–35 g is green inside and yellow outside the range",
         async run(app) {
           const page = await pagePlansOnce(app);
@@ -873,6 +873,7 @@
           const g = (n) => `${whole(n)} g`;
           const day = page.macroDay;
           const month = page.macroMonth;
+          const week = page.macroWeek;
           const pctSum = day.pcts.reduce((s, p) => s + parseFloat(p), 0);
 
           // Recalculate the plan's grams per day from its items, to check the optimizer's totals
@@ -907,6 +908,11 @@
               [`daily grams: ${day.grams.join(", ")}`, day.grams.join() === grams.map(g).join()],
               [`daily kcal: ${day.kcal.join(", ")}`, day.kcal.join() === kcal.map(whole).join()],
               [`daily total: ${day.total} kcal`, day.total === whole(total)],
+              ["Weekly is selected after tapping it", week.pressed === "week"],
+              [`weekly grams (× 7): ${week.grams.join(", ")}`, week.grams.join() === grams.map((n) => g(n * 7)).join()],
+              [`weekly kcal: ${week.kcal.join(", ")}`, week.kcal.join() === kcal.map((n) => whole(n * 7)).join()],
+              [`weekly total: ${week.total} kcal`, week.total === whole(total * 7)],
+              ["% of kcal stays the same when Weekly is on", week.pcts.join() === day.pcts.join()],
               ["Monthly is selected after tapping it", month.pressed === "month"],
               [`monthly grams (× ${DEFAULTS.days}): ${month.grams.join(", ")}`, month.grams.join() === grams.map((n) => g(n * DEFAULTS.days)).join()],
               [`monthly kcal: ${month.kcal.join(", ")}`, month.kcal.join() === kcal.map((n) => whole(n * DEFAULTS.days)).join()],
@@ -925,7 +931,7 @@
       {
         title: "Macros tab: its own tab and a plan switcher",
         expected:
-          "Macros is the fourth tab (after Plans) with its own icon. A switcher with the three plans sits at the top; tapping a plan " +
+          "Macros is the fourth tab (after My List) with its own icon. A switcher with the three plans sits at the top; tapping a plan " +
           "shows its macros, stays on the Macros tab, and selects that plan's card and grocery list too",
         async run(app) {
           const page = await pagePlansOnce(app);
@@ -937,7 +943,7 @@
             ["Macros tab button has its own icon", page.macrosHasIcon],
             [`switcher buttons: ${sw.buttons.join(", ")}`, sw.buttons.join() === THREE.join()],
             [`switcher labels: ${sw.labels.join(" / ")}`, sw.labels.join() === THREE.map((k) => three[k].title).join()],
-            [`switcher starts on the plan tapped on Plans (${sw.pressedAtStart})`, sw.pressedAtStart === "cheapest"],
+            [`switcher starts on the plan tapped on My List (${sw.pressedAtStart})`, sw.pressedAtStart === "cheapest"],
             ["switcher buttons are at least 44 px tall", sw.heights.every((h) => h >= 44)],
           ];
           for (const tap of sw.taps) {
@@ -946,8 +952,8 @@
               [`tap ${p.title}: switcher shows it as selected`, tap.pressed === tap.key],
               [`tap ${p.title}: still on the Macros tab (open: ${tap.tab})`, tap.tab === "macros"],
               [`tap ${p.title}: total ${tap.total} kcal (optimizer: ${whole(p.quality.macroKcalTotal)})`, tap.total === whole(p.quality.macroKcalTotal)],
-              [`tap ${p.title}: its Plans card is selected too (${tap.card})`, tap.card === tap.key],
-              [`tap ${p.title}: the grocery list on Plans shows it ("${tap.listHeading}")`, tap.listHeading === p.title],
+              [`tap ${p.title}: its My List card is selected too (${tap.card})`, tap.card === tap.key],
+              [`tap ${p.title}: the grocery list on My List shows it ("${tap.listHeading}")`, tap.listHeading === p.title],
             );
           }
           return { checks };
@@ -1607,7 +1613,7 @@
       {
         title: "Dark mode: readable on every tab",
         expected:
-          "At 360 px in Dark and Light, on Goals, App settings, Foods (with an editor and the search open), Plans and Macros: all text and input text has a " +
+          "At 360 px in Dark and Light, on Goals, App settings, My foods (with an editor and the search open), My List and Macros: all text and input text has a " +
           "contrast of at least 4.5:1 with what's behind it. In Dark the pie, swatches and dot are at least 3:1 against the card",
         async run(app) {
           const page = await pagePhoneOnce(app);
@@ -1704,7 +1710,7 @@
         title: "Goals tab: Save, Saved ✓, Save changes",
         expected:
           "The tab is called Goals. Save checks the % add up to 100 and saves nothing otherwise; a good save says \"Saved ✓\" and shows \"Create my grocery list →\", " +
-          "which opens Plans and makes the plans. Changing anything says \"Save changes\", hides that button and marks plans out of date. Typing alone saves nothing",
+          "which opens My List and makes the plans. Changing anything says \"Save changes\", hides that button and marks plans out of date. Typing alone saves nothing",
         async run(app) {
           const page = await pageSave(app);
           return {
@@ -1725,13 +1731,154 @@
               ["…the saved goals stay as they were until Save", page.changed.savedBudget === 3333],
               ["…a preset counts as a change too", page.presetChanged === "Save changes"],
               ["…unsaved changes are gone after a reload", page.unsavedGone === "3333"],
-              ["Create opens the Plans tab", page.created.tab === "plans"],
+              ["Create opens the My List tab", page.created.tab === "plans"],
               [`…and makes the three plans (${page.created.cards} cards)`, page.created.cards === 3],
               ["plans made: no out-of-date note or dot", !page.created.staleShown && !page.created.dotShown],
               ["changing a goal after that marks the plans out of date", page.stale.staleShown && page.stale.dotShown && page.stale.label === "Save changes"],
-              [`pressing Make on Plans with unsaved changes uses and saves them ("${page.madeUnsaved.label}", ${page.madeUnsaved.savedBudget} kr)`,
+              [`pressing Make on My List with unsaved changes uses and saves them ("${page.madeUnsaved.label}", ${page.madeUnsaved.savedBudget} kr)`,
                 page.madeUnsaved.label === "Saved ✓" && page.madeUnsaved.savedBudget === 4444 && !page.madeUnsaved.staleShown],
               ["…and a bad split there shows the error and makes nothing", /100%/.test(page.badMake.error) && page.badMake.savedBudget === 4444],
+            ],
+          };
+        },
+      },
+      {
+        title: "Navigation: Goals → My foods → My List",
+        expected:
+          "The second tab is called My foods, between Goals and My List. \"Make my grocery list\" at the bottom of My foods opens My List and makes the plans",
+        async run(app) {
+          const page = await pageMakeFromFoods();
+          return {
+            checks: [
+              [`tab labels: ${page.labels.join(", ")}`, page.labels.join() === "Goals,My foods,My List,Macros"],
+              [`page heading: "${page.heading}"`, page.heading === "My foods"],
+              ["the button comes after the list of foods", page.buttonAfterList],
+              [`its text: "${page.buttonText}"`, page.buttonText === "Make my grocery list"],
+              ["there are no plans before it's tapped", page.cardsBefore === 0],
+              [`it opens My List (open: ${page.tab}) and makes the plans (${page.cards} cards)`, page.tab === "plans" && page.cards === 3],
+              ["it's a real tap target (at least 44 px by its CSS)", page.minHeight >= 44],
+            ],
+          };
+        },
+      },
+      {
+        title: "Storage: every food is pantry or fresh",
+        expected:
+          "Every food has storage \"pantry\" (dry, canned, frozen, oil) or \"fresh\". The optimizer ignores it, so plans don't change",
+        run() {
+          const byId = (id) => foods.find((f) => f.id === id).storage;
+          const wrong = foods.filter((f) => !["pantry", "fresh"].includes(f.storage)).map((f) => f.id);
+          const pantry = ["rice", "tuna_can", "cod_frozen", "olive_oil", "lentils_red", "veg_frozen", "tomatoes_can"];
+          const fresh = ["eggs", "keso", "milk", "banana", "bread", "tofu", "potatoes"];
+          // The same foods without the field must give exactly the same plan
+          const without = foods.map(({ storage, ...rest }) => rest);
+          const same = THREE.every((key) => {
+            const a = Optimizer.planAll(DEFAULTS, foods, groups)[key];
+            const b = Optimizer.planAll(DEFAULTS, without, groups)[key];
+            return JSON.stringify(a.items.map((i) => [i.id, i.packages])) === JSON.stringify(b.items.map((i) => [i.id, i.packages]));
+          });
+          return {
+            checks: [
+              [`all ${foods.length} foods have a valid storage` + (wrong.length ? ` (wrong: ${wrong.join(", ")})` : ""), wrong.length === 0],
+              [`pantry: ${pantry.join(", ")}`, pantry.every((id) => byId(id) === "pantry")],
+              [`fresh: ${fresh.join(", ")}`, fresh.every((id) => byId(id) === "fresh")],
+              ["the plans are the same without the field", same],
+            ],
+          };
+        },
+      },
+      {
+        title: "Grocery list per week: how packs are shared",
+        expected:
+          "30 days is 4 weeks. Pantry foods are all bought in week 1; fresh foods are split evenly in whole packs (9 over 4 → 3, 2, 2, 2). " +
+          "For all three plans every food's packs and the total cost stay exactly the same as the month's",
+        async run(app) {
+          const fake = {
+            items: [
+              { id: "rice", packages: 5, cost: 150 },
+              { id: "keso", packages: 9, cost: 198 },
+              { id: "banana", packages: 1, cost: 25 },
+            ],
+          };
+          const weeks = app.weeklyList(fake, 30);
+          const packsOf = (id) => weeks.map((w) => (w.rows.find((r) => r.f.id === id) || { packages: 0 }).packages).join();
+          const checks = [
+            [`weeks: 30 days → ${app.weekCount(30)}, 31 → ${app.weekCount(31)}, 14 → ${app.weekCount(14)}, 7 → ${app.weekCount(7)}, 3 → ${app.weekCount(3)}`,
+              [30, 31, 14, 7, 3].map(app.weekCount).join() === "4,4,2,1,1"],
+            [`pantry rice 5 packs: ${packsOf("rice")}`, packsOf("rice") === "5,0,0,0"],
+            [`fresh keso 9 packs: ${packsOf("keso")}`, packsOf("keso") === "3,2,2,2"],
+            [`fresh bananas 1 pack: ${packsOf("banana")}`, packsOf("banana") === "1,0,0,0"],
+            [`week costs: ${weeks.map((w) => w.cost).join(", ")}`, weeks.map((w) => w.cost).join() === `${150 + 66 + 25},44,44,44`],
+          ];
+          // Real plans, several periods: nothing is lost or added by the split
+          for (const [settings, plans] of [[DEFAULTS, scenarios.three()], [PACKS_HIGH, scenarios.packsHigh()]]) {
+            for (const key of THREE) {
+              const plan = plans[key];
+              if (plan.status !== "optimal") continue;
+              const split = app.weeklyList(plan, settings.days);
+              const total = split.reduce((sum, w) => sum + w.cost, 0);
+              const packsMatch = plan.items.every((i) =>
+                split.reduce((sum, w) => sum + w.rows.filter((r) => r.f.id === i.id).reduce((n, r) => n + r.packages, 0), 0) === i.packages);
+              const pantryOk = split.slice(1).every((w) => w.rows.every((r) => r.f.storage === "fresh"));
+              checks.push([`${settings.days} days, ${plan.title}: packs and ${fmt(total)} kr match, pantry only in week 1`,
+                packsMatch && Math.abs(total - plan.totals.shoppingCost) < EPS && pantryOk]);
+            }
+          }
+          return { checks };
+        },
+      },
+      {
+        title: "Week / Month switch at the top of My List",
+        expected:
+          "Month by default. Week shows one table per week on My List and Copy list follows it. The choice survives a reload, is saved without the Save button, " +
+          "and never changes the plans or marks them out of date",
+        async run(app) {
+          const page = await pageListView();
+          const plan = scenarios.three().realistic;
+          const weeks = app.weeklyList(plan, DEFAULTS.days);
+          const wantText = app.copyListText(plan, DEFAULTS.days, "week");
+          const lines = wantText.split("\n");
+          return {
+            checks: [
+              ["the tab is called My List", page.tabLabel === "My List"],
+              ["the switch is on My List, above the button, and no longer on Goals", page.atTop],
+              ["it's the first thing on the tab", page.firstOnTab],
+              ["with no plans yet it's already there", page.shownBeforePlans],
+              [`Month by default (${page.first.pressed}), one table, nothing saved`, page.first.pressed === "month" && page.first.tables === 1 && page.first.saved === null],
+              [`Week: ${page.week.weeks} week sections (expected ${weeks.length})`, page.week.weeks === weeks.length && page.week.pressed === "week"],
+              ["every row shows the packs of the optimizer's plan, split over the weeks", page.week.rows === weeks.reduce((n, w) => n + w.rows.length, 0)],
+              [`week costs on the page: ${page.week.costs.join(", ")}`, page.week.costs.join() === weeks.map((w) => `${Math.round(w.cost).toLocaleString("en-GB")} kr`).join()],
+              ["it's saved straight away", page.week.saved === "week"],
+              ["the Save button still says Saved ✓", page.week.saveLabel === "Saved ✓"],
+              ["no out-of-date dot or note", !page.week.dotShown && !page.week.staleShown],
+              ["the plan's cost and cards don't change", page.week.cardsHtml === page.first.cardsHtml],
+              [`Copy list in Week: "${lines[0]}", "${lines[2]}"`, page.week.copied === wantText && lines[0].endsWith("week by week") && /^Week 1 – [\d,]+ kr$/.test(lines[2])],
+              ["after a reload it's still Week", page.reloaded === "week"],
+              ["Month brings back the one table with the same packs", page.month.tables === 1 && page.month.rows === plan.items.length],
+              ["Copy list in Month is the normal list", page.month.copied === app.copyListText(plan, DEFAULTS.days)],
+              ["an unknown saved value counts as Month", page.bad === "month"],
+            ],
+          };
+        },
+      },
+      {
+        title: "Fibre below the range: a tip that helps",
+        expected:
+          "When a plan's fibre is under 25 g, the Macros tab names high-fibre foods from foods.json that aren't in My foods yet and has a button to My foods. " +
+          "With enough fibre there's no tip; if every high-fibre food is already in My foods, it says so",
+        async run(app) {
+          const page = await pageFibreTip();
+          const named = foods.filter((f) => page.low.tip.includes(`“${f.name}”`));
+          return {
+            checks: [
+              [`the plan's fibre is below the range (${page.low.fiber})`, parseFloat(page.low.fiber) < 25],
+              [`tip: "${page.low.tip}"`, /To get more fibre/.test(page.low.tip)],
+              [`it names high-fibre foods (${named.map((f) => f.id).join(", ")})`,
+                named.length > 0 && named.every((f) => Optimizer.fiberRating(f) === "high")],
+              ["…that aren't in My foods yet", named.every((f) => !page.starters.includes(f.id))],
+              ["the button opens My foods", page.low.buttonOpens === "foods"],
+              [`no tip on a plan with enough fibre (${page.enough.fiber})`, parseFloat(page.enough.fiber) >= 25 && page.enough.tip === "" && !page.enough.hasButton],
+              [`every high-fibre food already added: "${page.allAdded}"`, /already in My foods/.test(page.allAdded)],
             ],
           };
         },
@@ -1952,7 +2099,7 @@
       }
     }
 
-    // Type settings into the hidden page, open Plans and make the three plans (waits until they're drawn)
+    // Type settings into the hidden page, open My List and make the three plans (waits until they're drawn)
     async function pageMakePlans(app, settings) {
       const doc = app.document;
       for (const [key, value] of Object.entries(settings)) {
@@ -2169,7 +2316,7 @@
         const tabOrder = [...doc.querySelectorAll(".tab-bar .tab")].map((t) => t.dataset.tab);
         const macrosHasIcon = Boolean(doc.querySelector('.tab-bar [data-tab="macros"] svg'));
         const hasListTab = Boolean(doc.querySelector('.tab-bar [data-tab="list"], #panel-list'));
-        // Someone whose last open tab was the old List tab gets Plans
+        // Someone whose last open tab was the old List tab gets My List
         app.localStorage.setItem("pbp.tab", "list");
         const oldListTab = app.loadTab();
         // …and the old Settings tab is now called Goals
@@ -2186,7 +2333,7 @@
         setInput("days", DEFAULTS.days);
         for (const f of foods) app.addFood(f.id);
 
-        // Go to the Plans tab, press the button and wait for the cards (the page re-enables the button when done)
+        // Go to the My List tab, press the button and wait for the cards (the page re-enables the button when done)
         tapTab("plans");
         doc.getElementById("make-list").click();
         await waitFor(() => doc.querySelectorAll(".plan-card").length === 3 && !doc.getElementById("make-list").disabled);
@@ -2206,7 +2353,7 @@
           Boolean(doc.getElementById("plan-cards").compareDocumentPosition(detailEl) & app.Node.DOCUMENT_POSITION_FOLLOWING);
         const dotBefore = !doc.getElementById("plans-dot").hidden;
 
-        // Tap the "Absolute cheapest" card: it should be selected and its list shown, still on Plans
+        // Tap the "Absolute cheapest" card: it should be selected and its list shown, still on My List
         doc.querySelector('.plan-card[data-key="cheapest"]').click();
         const afterTap = { ...readDetail(), selected: selectedKey(), tab: openTab(), savedTab: app.localStorage.getItem("pbp.tab") };
 
@@ -2241,6 +2388,8 @@
           };
         };
         const macroDay = readMacro();
+        section.querySelector('[data-macro-period="week"]').click();
+        const macroWeek = readMacro();
         section.querySelector('[data-macro-period="month"]').click();
         const macroMonth = readMacro();
         section.querySelector('[data-macro-period="day"]').click();
@@ -2272,7 +2421,7 @@
 
         return {
           tabsShown, tabHeights, tabAfterRun, cards: cards.map((c) => c.dataset.key), cardsHaveStats,
-          selectedAtStart, first, afterTap, dotBefore, dotAfter, staleShown, macroDay, macroMonth,
+          selectedAtStart, first, afterTap, dotBefore, dotAfter, staleShown, macroDay, macroWeek, macroMonth,
           tabOrder, macrosHasIcon, switcher, hasListTab, oldListTab, oldSettingsTab, listUnderCards,
         };
       } finally {
@@ -2596,12 +2745,17 @@
           states["Foods with the search open"] = readPhoneState(win);
           win.closeResults();
 
-          // Plans: each plan's list; the budget makes the out-of-date note, ✘ and "not possible" show too
+          // My List: each plan's list; the budget makes the out-of-date note, ✘ and "not possible" show too
           win.showTab("plans");
           for (const key of ["cheapest", "realistic", "highQuality"]) {
             win.selectPlan(key);
-            states[`Plans, ${key}`] = readPhoneState(win);
+            states[`My List, ${key}`] = readPhoneState(win);
           }
+          // The same plan's list per week
+          win.selectPlan("cheapest");
+          win.setListView("week");
+          states["My List, per week"] = readPhoneState(win);
+          win.setListView("month");
           win.showTab("macros");
           for (const key of ["cheapest", "realistic", "highQuality"]) {
             win.selectPlan(key);
@@ -2818,7 +2972,7 @@
         doc = win.document;
         const unsavedGone = doc.getElementById("budget").value;
 
-        // Create: opens Plans and makes the plans
+        // Create: opens My List and makes the plans
         save();
         doc.getElementById("create-list").click();
         const started = Date.now();
@@ -2836,16 +2990,147 @@
         setInput("budget", 4444);
         const stale = { staleShown: staleShown(), dotShown: dotShown(), label: label() };
 
-        // The Plans button with unsaved changes: uses them, and keeps them
+        // The My List button with unsaved changes: uses them, and keeps them
         await win.makeGroceryList();
         const madeUnsaved = { label: label(), savedBudget: savedGoals().budget, staleShown: staleShown() };
 
-        // The Plans button with a split that doesn't add up
+        // The My List button with a split that doesn't add up
         setInput("fatPct", 30);
         await win.makeGroceryList();
         const badMake = { error: doc.getElementById("plan-error").textContent, savedBudget: savedGoals().budget };
 
         return { tabLabel, heading, first, typed, bad, fixed, good, enterSaved, reloaded, changed, presetChanged, unsavedGone, created, stale, madeUnsaved, badMake };
+      } finally {
+        await restoreData(savedData);
+      }
+    }
+
+    // Wait for the cards after a tap that makes plans
+    async function waitForCards(doc) {
+      const started = Date.now();
+      while (doc.querySelectorAll(".plan-card").length === 0 && Date.now() - started < 15000) {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+    }
+
+    // Test 53: the button at the bottom of My foods, on a freshly loaded page
+    async function pageMakeFromFoods() {
+      const savedData = snapshotData();
+      try {
+        localStorage.setItem("pbp.myFoods", JSON.stringify(foods.map((f) => f.id)));
+        localStorage.removeItem("pbp.limits");
+        localStorage.setItem("pbp.settings", JSON.stringify(DEFAULTS));
+        localStorage.setItem("pbp.tab", "foods");
+        const win = await reloadApp();
+        const doc = win.document;
+        const button = doc.getElementById("make-list-foods");
+        const labels = [...doc.querySelectorAll(".tab-bar .tab-label")].map((l) => l.textContent);
+        const heading = doc.querySelector("#panel-foods h2").textContent;
+        const buttonAfterList = Boolean(doc.getElementById("food-list").compareDocumentPosition(button) & win.Node.DOCUMENT_POSITION_FOLLOWING);
+        const cardsBefore = doc.querySelectorAll(".plan-card").length;
+        const buttonText = button.textContent;
+        const minHeight = parseFloat(win.getComputedStyle(button).minHeight);
+        button.click();
+        await waitForCards(doc);
+        return {
+          labels, heading, buttonAfterList, cardsBefore, buttonText, minHeight,
+          tab: [...doc.querySelectorAll(".tab-panel")].filter((p) => !p.hidden).map((p) => p.id.replace("panel-", "")).join("+"),
+          cards: doc.querySelectorAll(".plan-card").length,
+        };
+      } finally {
+        await restoreData(savedData);
+      }
+    }
+
+    // Test 56: the Week / Month switch with plans made, and Copy list in both views
+    async function pageListView() {
+      const savedData = snapshotData();
+      let win = null;
+      try {
+        localStorage.setItem("pbp.myFoods", JSON.stringify(foods.map((f) => f.id)));
+        localStorage.removeItem("pbp.limits");
+        localStorage.removeItem("pbp.listView");
+        localStorage.setItem("pbp.settings", JSON.stringify(DEFAULTS));
+        win = await reloadApp();
+        let doc = win.document;
+        let copied = null;
+        const useFakeClipboard = () => Object.defineProperty(win.navigator, "clipboard", {
+          configurable: true,
+          value: { writeText: async (text) => { copied = text; } },
+        });
+        const copy = async () => {
+          copied = null;
+          useFakeClipboard();
+          doc.querySelector("#plan-detail [data-copy-list]").click();
+          const started = Date.now();
+          while (copied === null && Date.now() - started < 3000) await new Promise((resolve) => setTimeout(resolve, 20));
+          return copied;
+        };
+        const read = () => ({
+          pressed: doc.querySelector('[data-list-view][aria-pressed="true"]').dataset.listView,
+          tables: doc.querySelectorAll("#plan-detail .grocery").length,
+          weeks: doc.querySelectorAll("#plan-detail .grocery-week").length,
+          rows: doc.querySelectorAll("#plan-detail .grocery tbody tr").length,
+          costs: [...doc.querySelectorAll("#plan-detail .week-cost")].map((c) => c.textContent),
+          saved: localStorage.getItem("pbp.listView"),
+          saveLabel: doc.getElementById("save-goals").textContent,
+          dotShown: !doc.getElementById("plans-dot").hidden,
+          staleShown: !doc.getElementById("plans-stale").hidden,
+          cardsHtml: doc.getElementById("plan-cards").innerHTML,
+        });
+        const tap = (view) => doc.querySelector(`[data-list-view="${view}"]`).click();
+        const toggle = doc.querySelector(".list-view");
+        const panel = doc.getElementById("panel-plans");
+        const atTop = panel.contains(toggle) && !doc.getElementById("panel-goals").contains(toggle) &&
+          Boolean(toggle.compareDocumentPosition(doc.getElementById("make-list")) & win.Node.DOCUMENT_POSITION_FOLLOWING);
+        const firstOnTab = panel.firstElementChild === doc.getElementById("list-view-title");
+        const tabLabel = doc.querySelector("#tab-plans .tab-label").textContent;
+        const shownBeforePlans = doc.querySelectorAll(".plan-card").length === 0 && panel.contains(toggle);
+        await win.makeGroceryList();
+        const first = read();
+        tap("week");
+        const week = { ...read(), copied: await copy() };
+        tap("month");
+        const month = { ...read(), copied: await copy() };
+        tap("week");
+        win = await reloadApp();
+        const reloaded = win.document.querySelector('[data-list-view][aria-pressed="true"]').dataset.listView;
+        localStorage.setItem("pbp.listView", "purple");
+        win = await reloadApp();
+        const bad = win.document.querySelector('[data-list-view][aria-pressed="true"]').dataset.listView;
+        return { atTop, firstOnTab, tabLabel, shownBeforePlans, first, week, month, reloaded, bad };
+      } finally {
+        await restoreData(savedData);
+      }
+    }
+
+    // Test 57: the starter foods give a plan low in fibre, and plan 3 has enough
+    async function pageFibreTip() {
+      const savedData = snapshotData();
+      try {
+        const starters = foods.filter((f) => f.starter === true).map((f) => f.id);
+        localStorage.setItem("pbp.myFoods", JSON.stringify(starters));
+        localStorage.removeItem("pbp.limits");
+        localStorage.setItem("pbp.settings", JSON.stringify(DEFAULTS));
+        const win = await reloadApp();
+        const doc = win.document;
+        await win.makeGroceryList();
+        win.showTab("macros");
+        const read = () => ({
+          fiber: doc.querySelector(".range-value").textContent,
+          tip: (doc.querySelector(".fibre-tip") || { textContent: "" }).textContent,
+          hasButton: Boolean(doc.querySelector('#macro-section [data-go-tab="foods"]')),
+        });
+        win.selectPlan("highQuality");
+        const enough = read();
+        win.selectPlan("realistic");
+        const low = read();
+        doc.querySelector('#macro-section [data-go-tab="foods"]').click();
+        low.buttonOpens = [...doc.querySelectorAll(".tab-panel")].filter((p) => !p.hidden).map((p) => p.id.replace("panel-", "")).join("+");
+        // Every food in My foods: nothing left to suggest
+        for (const f of foods) win.addFood(f.id);
+        const allAdded = win.fibreTipText({ totals: { fiberPerDay: 20 } });
+        return { starters, low, enough, allAdded };
       } finally {
         await restoreData(savedData);
       }

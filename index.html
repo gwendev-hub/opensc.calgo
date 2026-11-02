@@ -85,18 +85,18 @@
           <p id="save-error" class="error" role="alert"></p>
         </form>
 
-        <!-- Shown after a successful save: opens Plans and makes the plans -->
+        <!-- Shown after a successful save: opens My List and makes the plans -->
         <button type="button" id="create-list" class="primary create-list" hidden>Create my grocery list →</button>
       </section>
 
     </div>
 
-    <!-- ===== Tab 2: Foods ===== -->
+    <!-- ===== Tab 2: My foods ===== -->
     <div id="panel-foods" class="tab-panel" role="tabpanel" aria-labelledby="tab-foods" hidden>
-      <!-- Foods card: search to add foods, and "My foods" (the only foods the optimizer uses).
+      <!-- My foods card: search to add foods, and the list of foods (the only ones the optimizer uses).
            Both lists are built by app.js from data/foods.json -->
       <section class="card" aria-labelledby="foods-title">
-        <h2 id="foods-title">Foods</h2>
+        <h2 id="foods-title">My foods</h2>
 
         <!-- Search box. Focusing it opens the full food list below it; typing filters it.
              Disabled until data/foods.json has loaded. -->
@@ -108,7 +108,7 @@
           <ul id="food-results" class="food-results" role="listbox" aria-label="Foods" hidden></ul>
         </div>
 
-        <h3 class="section-title">My foods <span id="my-food-count" class="muted"></span></h3>
+        <h3 class="section-title">Your foods <span id="my-food-count" class="muted"></span></h3>
         <p class="hint">Plans only use these foods. Untick a food to remove it; tap a food to set its own min and max grams per day.</p>
 
         <!-- How to order foods inside each category -->
@@ -120,11 +120,21 @@
 
         <!-- app.js fills this with one group per category (My foods only) -->
         <div id="food-list" aria-live="polite">Loading foods…</div>
+
+        <!-- The next step after choosing foods: opens My List and makes the plans (enabled once the foods have loaded) -->
+        <button type="button" id="make-list-foods" class="primary make-list-foods" disabled>Make my grocery list</button>
       </section>
     </div>
 
-    <!-- ===== Tab 3: Plans – the button, the three comparison cards, and the selected plan's grocery list ===== -->
+    <!-- ===== Tab 3: My List – the Week / Month switch, the button, the three comparison cards, and the selected plan's grocery list ===== -->
     <div id="panel-plans" class="tab-panel" role="tabpanel" aria-labelledby="tab-plans" hidden>
+      <!-- How to show the grocery list. Only changes the display, so it's saved straight away (app.js) -->
+      <p id="list-view-title" class="field-title">Show my grocery list per</p>
+      <div class="toggle list-view" role="group" aria-labelledby="list-view-title">
+        <button type="button" data-list-view="week" aria-pressed="false">Week</button>
+        <button type="button" data-list-view="month" aria-pressed="true">Month</button>
+      </div>
+      <p class="hint list-view-hint">Plans are always made for the whole period, so whole packs stay sensible. Week only splits up the shopping.</p>
       <!-- The big button that runs the optimizer (enabled once the food data has loaded) -->
       <button type="button" id="make-list" class="primary" disabled>Make my grocery list</button>
       <p id="plan-error" class="error" role="alert"></p>
@@ -148,8 +158,8 @@
     <div id="panel-macros" class="tab-panel" role="tabpanel" aria-labelledby="tab-macros" hidden>
       <!-- Before the first run -->
       <section id="macros-empty" class="card">
-        <p class="hint">No macros yet. Make your plans on the Plans tab first.</p>
-        <button type="button" class="secondary" data-go-tab="plans">Go to Plans</button>
+        <p class="hint">No macros yet. Make your plans on the My List tab first.</p>
+        <button type="button" class="secondary" data-go-tab="plans">Go to My List</button>
       </section>
       <section id="macro-section" class="card" aria-live="polite" hidden></section>
     </div>
@@ -201,7 +211,7 @@
     <button type="button" class="tab" id="tab-foods" role="tab" aria-controls="panel-foods" aria-selected="false" data-tab="foods">
       <!-- Ticked checklist icon -->
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l2 2 3-3M4 13l2 2 3-3M4 20l2 2 3-3M12 7h8M12 14h8M12 21h8"/></svg>
-      <span class="tab-label">Foods</span>
+      <span class="tab-label">My foods</span>
     </button>
     <button type="button" class="tab" id="tab-plans" role="tab" aria-controls="panel-plans" aria-selected="false" data-tab="plans">
       <!-- Three cards icon, plus a dot when the plans are out of date -->
@@ -209,7 +219,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="9.5" y="4" width="5" height="16" rx="1"/><rect x="16" y="4" width="5" height="16" rx="1"/></svg>
         <span id="plans-dot" class="tab-dot" hidden><span class="visually-hidden">(out of date)</span></span>
       </span>
-      <span class="tab-label">Plans</span>
+      <span class="tab-label">My List</span>
     </button>
     <button type="button" class="tab" id="tab-macros" role="tab" aria-controls="panel-macros" aria-selected="false" data-tab="macros">
       <!-- Pie chart icon -->

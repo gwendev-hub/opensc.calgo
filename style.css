@@ -208,6 +208,38 @@ h1 {
   margin-top: 12px;
 }
 
+/* "Make my grocery list" at the bottom of My foods */
+.make-list-foods {
+  margin-top: 16px;
+}
+
+/* A label for something that isn't a single input, e.g. the Week / Month switch */
+.field-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+/* Room between the Week / Month switch's note and the button under it */
+.hint.list-view-hint {
+  margin-bottom: 12px;
+}
+
+.list-view {
+  margin: 0 0 8px;
+}
+
+/* One shopping week in the grocery list */
+.week-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.week-empty {
+  color: var(--muted);
+  margin: 0;
+}
+
 .subtitle {
   color: var(--muted);
   margin: 0 0 16px;
@@ -953,6 +985,11 @@ button.secondary {
 
 .range-row.in-range     { background: var(--good-bg); color: var(--good-text); }
 .range-row.out-of-range { background: var(--warn-bg); color: var(--warn-strong); }
+
+/* What to do about a range that's missed */
+.fibre-tip {
+  margin: 8px 0 0;
+}
 
 .range-name  { font-weight: 700; min-width: 3.5em; }
 .range-value { font-weight: 600; }

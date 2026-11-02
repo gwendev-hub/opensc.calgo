@@ -17,9 +17,10 @@
 - **Files:** `index.html`, `style.css`, `app.js` (UI), `optimizer.js` (model and solver), `data/foods.json`, `data/groups.json`, `test.html`, `README.md`, `CLAUDE.md`, `PLAN.md`.
 
 ## 2. Data – `data/foods.json`
-All nutrition is **per 100 g**. Fields: `id` (stable, never reused), `name`, `aliases` (Swedish and English search words), `category`, `starter`, `packGrams`, `packPrice`, `pieceGrams` / `pieceName` (for eggs, bars, cans), `kcal`, `protein`, `carbs` (without fibre, as on Swedish labels), `fiber`, `fat`, `saturatedFat`, `sugar` (stored, not shown), `maxGramsPerDay`, optional `realisticMaxGramsPerDay`, `minGramsIfUsed`, `limitGroup`, plus `priceSource` / `nutritionSource` with a date.
+All nutrition is **per 100 g**. Fields: `id` (stable, never reused), `name`, `aliases` (Swedish and English search words), `category`, `storage`, `starter`, `packGrams`, `packPrice`, `pieceGrams` / `pieceName` (for eggs, bars, cans), `kcal`, `protein`, `carbs` (without fibre, as on Swedish labels), `fiber`, `fat`, `saturatedFat`, `sugar` (stored, not shown), `maxGramsPerDay`, optional `realisticMaxGramsPerDay`, `minGramsIfUsed`, `limitGroup`, plus `priceSource` / `nutritionSource` with a date.
 - **Check:** kcal ≈ 4 × protein + 4 × carbs + 9 × fat + 2 × fibre, within 15% (a test catches typos).
 - **`groups.json`:** limits on the total of several foods together (e.g. dairy, dry grains). They scale with the calorie target.
+- **`storage`:** `"pantry"` (dry, canned, frozen, oil) or `"fresh"`. It only decides when the weekly list buys a food; the optimizer ignores it.
 - **Starter set:** about 15 foods with `starter: true` fill **My foods** on a first visit.
 
 ## 3. Protein quality (core idea)
@@ -57,16 +58,16 @@ The classic **diet problem**, solved with linear programming: the cheapest set o
 ## 5. Screens
 A bottom tab bar on phones (moves to the top on wide screens), ≥ 44 px tap targets, the last open tab remembered.
 
-1. **Goals:** calories, macro % (or grams), tolerance, presets (Balanced 30/45/25, High protein 35/40/25, Lower carb 30/30/40), budget, days. A **Save** button checks the input and shows **"Saved ✓"** (it says "Save changes" when something is unsaved). After saving, a **"Create my grocery list →"** button opens Plans and runs them.
-2. **Foods:** a **search bar** (tap to see every food, type to filter, ignores case and å/ä/ö, matches aliases) and **My foods**, grouped by category, with badges and kr per 100 g protein. Untick to remove. Tap a food to set your own min/max. The optimizer uses only My foods.
-3. **Plans:** three cards (cost vs budget, protein, kcal, % Excellent, number of foods). Tap one to see its **grocery list**: Food, Per day, Packs (*2 × 1 kg*, *3 × 12 eggs*), Cost, plus "X% of your protein comes from Excellent sources" and a **Copy list** button. A red dot and an "out of date" note appear when the goals or foods change.
-4. **Macros:** a plan switcher, a pie chart, and a table with grams, kcal and % for protein, carbs, fat and fibre against the goals; a daily/monthly toggle; a fibre range (fat and carbs are compared with your goals).
+1. **Goals:** calories, macro % (or grams), tolerance, presets (Balanced 30/45/25, High protein 35/40/25, Lower carb 30/30/40), budget, days. A **Save** button checks the input and shows **"Saved ✓"** (it says "Save changes" when something is unsaved). After saving, a **"Create my grocery list →"** button opens My List and runs them.
+2. **My foods:** a **search bar** (tap to see every food, type to filter, ignores case and å/ä/ö, matches aliases) and your foods, grouped by category, with badges and kr per 100 g protein. Untick to remove. Tap a food to set your own min/max. The optimizer uses only these foods. A **"Make my grocery list"** button at the bottom opens My List and runs them, so the flow is Goals → My foods → My List.
+3. **My List:** at the top, a **Week / Month** switch for the grocery list (saved straight away; it only changes the display). Then three plan cards (cost vs budget, protein, kcal, % Excellent, number of foods). Tap one to see its **grocery list**: Food, Per day, Packs (*2 × 1 kg*, *3 × 12 eggs*), Cost, plus "X% of your protein comes from Excellent sources" and a **Copy list** button. **Per week:** plans are always optimized for the whole period, which keeps whole packs sensible, and the list then shows shopping weeks (days ÷ 7, rounded, so 30 days is 4). Pantry foods are bought in week 1, and fresh foods are split evenly in whole packs. Copy list follows the view. A red dot and an "out of date" note appear when the goals or foods change.
+4. **Macros:** a plan switcher, a pie chart, and a table with grams, kcal and % for protein, carbs, fat and fibre against the goals; a Daily / Weekly / Monthly toggle; a fibre range (fat and carbs are compared with your goals). Below the range, a tip names high-fibre foods from `foods.json` to add, with a button to My foods.
 5. **⚙️ App** (icon in the top corner, not a tab): appearance (System / Light / Dark), **Clear my data** (asks first, removes only `pbp.*`), "Your data stays with you, I haven't started selling it yet :)", and About (version, price date, not medical advice, feedback link).
 
 ## 6. Status
-Done: skeleton, food data, optimizer, three plans, whole packs, tabs, search, min/max, Copy list, nutrients and Macros tab, full macro goals.
-**Now:** step 7 (dark mode and App page), then the layout fixes (Goals tab with Save, Excellent-only badge, ⚙️ App page).
-**Then:** step 8 (feedback link, share with friends).
+Done: skeleton, food data, optimizer, three plans, whole packs, tabs, search, min/max, Copy list, nutrients and Macros tab, full macro goals, dark mode and App page, Goals tab with Save, Excellent-only badge, My foods button, weekly view.
+**Now:** step 8 (feedback link, share with friends).
+**Then:** the next versions in section 8.
 
 Tests live in `test.html` (each test describes itself); every change keeps them all passing and adds a test for each new rule.
 
@@ -78,12 +79,22 @@ Tests live in `test.html` (each test describes itself); every change keeps them 
 5. Weekly list, monthly list, or meal suggestions?
 6. Which plan did you pick, and why?
 
-## 8. Later (let the feedback decide)
+## 8. Later
+
+### Next versions (not built yet)
+**Meal planner**
+- **3a – Split into meals:** meal tags in `foods.json`, and a rule-based split of the plan into 3 meals + snacks for 7 days.
+- **3b – Day view:** ticks and daily macro progress, saved per date.
+- **3c – Week view.**
+
+**Scraping track (prices per store)**
+- `products` (EAN barcodes) and `prices` (store, price, date) linked to `foods.id`. A price range per food, "my stores", a list split by store, and deal alerts from a weekly GitHub Actions job (Python). Check each store's terms and `robots.txt` first.
+
+### After that (let the feedback decide)
 - **Protein price ranking tab:** all foods ranked by kr per gram of protein, with a **protein type** column: Complete (fish, eggs, dairy, soy), Incomplete (legumes, grains; "combine with grains"), Mostly complete (bars with collagen). Filters: complete only, Excellent only, My foods only.
-- **Prices per store:** `products` (EAN barcodes) and `prices` (store, price, date) linked to `foods.id`. A price range per food, "my stores", a list split by store, and deal alerts from a weekly GitHub Actions job (Python). Check each store's terms and `robots.txt` first.
 - **Barcode scanning** with Open Food Facts, with the price typed in.
 - **AI meal ideas** from the grocery list (free Gemini or Groq tier behind a Cloudflare Worker; never put an API key in the site).
-- Personal calorie calculator, weekly lists, a shopping tick-off mode, export/import of data, accounts (needs a backend; only once people use the app).
+- Personal calorie calculator, a shopping tick-off mode, export/import of data, accounts (needs a backend; only once people use the app).
 
 ## 9. Risks
 - **Bad prices or nutrition give bad advice:** show sources and dates; keep `foods.json` easy to edit.

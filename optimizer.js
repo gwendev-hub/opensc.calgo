@@ -1261,6 +1261,6 @@ const Optimizer = (() => {
   // What other files can use
   return {
     DEFAULT_RULES, PLAN_TITLES, proteinRating, fiberRating, nutrientWarnings, macroGoals, macroSplitProblem,
-    buildModel, solve, plan, planAll,
+    suggestFoods, buildModel, solve, plan, planAll,
   };
 })();
