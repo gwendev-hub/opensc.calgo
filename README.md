@@ -3,8 +3,8 @@ READ ME
 This is a small personal web app: a protein and food budget planner. The full plan is in PLAN.md. Read it before starting any task.
 
 How we work
-Do one build step from PLAN.md section 7 at a time. Stop when that step's "Done when" check is met, and tell me how to test it.
-Keep changes small. Don't add features from PLAN.md section 10 (later versions) unless I ask.
+Do one step at a time (the Status section of PLAN.md says what's next). Stop when that step works, and tell me how to test it.
+Keep changes small. Don't add features from the Later section of PLAN.md unless I ask.
 Before changing anything big, explain your plan in a few lines first.
 I'm learning, so briefly explain what you did and why in plain words.
 Suggest a short commit message after each step. Don't push unless I ask.
@@ -15,10 +15,10 @@ External libraries are loaded from a CDN with an exact pinned version (e.g. java
 It must work by opening index.html through GitHub Pages on a phone. Design mobile-first.
 Food data lives in data/foods.json. Nutrition is per 100 g. Never hard-code foods in JavaScript.
 Wrap localStorage reads and writes in try/catch.
-Protein rating rule (PLAN.md section 4): protein × 10 > kcal = Excellent, ≥ kcal/2 = OK, otherwise Poor. Don't change this rule without asking.
-Protein labels (PLAN.md section 4.2): the page shows only the green Excellent badge. OK and Poor stay internal and are still used by the optimizer. There are no lifts/dilutes labels.
+Protein rating rule (Protein quality section of PLAN.md): protein × 10 > kcal = Excellent, ≥ kcal/2 = OK, otherwise Poor. Don't change this rule without asking.
+Protein labels (Protein quality section of PLAN.md): the page shows only the green Excellent badge. OK and Poor stay internal, and no optimizer rule depends on them. There are no lifts/dilutes labels.
 Testing
-test.html runs the optimizer test cases from PLAN.md section 8. Keep every test passing, and add a test for each new rule.
+test.html runs the test cases, and each test describes itself. Keep every test passing, and add a test for each new rule.
 To test locally, run python3 -m http.server in the project folder and open http://localhost:8000. Pages that load JSON don't work when opened straight from the file system.
 
 How to run

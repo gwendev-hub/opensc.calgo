@@ -6,6 +6,12 @@
 //
 // Everything is wrapped in one object, `Optimizer`, so none of the names here
 // clash with the ones in app.js.
+// What the numbers in data/foods.json mean (all per 100 g):
+//   carbsPer100g – available carbohydrates ("kolhydrater" on Swedish labels), without fibre
+//   saturatedFatPer100g – part of fatPer100g; sugarPer100g – part of carbsPer100g
+//   Check: kcal ≈ 4 × protein + 4 × carbs + 9 × fat + 2 × fibre, within 15%. Products with sugar
+//   alcohols (e.g. Barebells) count them as carbs, which makes the estimate a bit high.
+//
 const Optimizer = (() => {
   // Default rules. All of them can be overridden through settings.rules
   // (PLAN.md section 4.3 says they'll be editable under "Advanced" later).
@@ -60,6 +66,14 @@ const Optimizer = (() => {
     return sum === 100 ? null : `Protein, carbs and fat must add up to 100%. Now they add up to ${sum}%.`;
   }
 
+  // There's deliberately no "Poor foods ≤ 40% of calories" rule any more. Nearly all carbs and fat
+  // come from foods rated Poor, so it fought the macro goals: 3,000 kcal at about 21 / 54 / 25 had no
+  // plan at all, and at 1,700 kcal it held carbs at the bottom of their range. The macro ranges now
+  // stop one kind of food taking over. OK and Poor don't appear in any rule of the model; they only
+  // give the plan's protein and kcal shares and decide which foods a message suggests.
+  //
+  // Why the variety rule exists: without it the cheapest answer is boring, e.g. mostly lentils and oats.
+  //
   // Amounts below this many grams per day are treated as zero.
   // The solver can return tiny amounts like 0.0000001 g, and we don't want
   // to tell anyone to buy a whole pack of something because of that.
@@ -110,6 +124,8 @@ const Optimizer = (() => {
     return { ...DEFAULT_RULES, ...(settings.rules || {}) };
   }
 
+  // maxGramsPerDay is a sensible default, so the plan can't say e.g. 600 g of lentils a day.
+  // Plan 1 ignores realisticMaxGramsPerDay, minGramsIfUsed and limitGroup.
   // Per-food min and max in grams per day.
   // Max is the user's override if there is one. Otherwise it's maxGramsPerDay
   // from foods.json, or the stricter realisticMaxGramsPerDay (if the food has one)
@@ -141,6 +157,11 @@ const Optimizer = (() => {
       // Grams: the floor is never above the max, so a user max of e.g. 20 g still lets the food in
       return { unit: 1, min, max, floor: Math.min(max, floorGrams) };
     }
+    // With whole packs a food can be below its floor only when one more pack would go over its max,
+    // e.g. prästost (max 40 g): 1 pack of 700 g over 30 days is 23 g a day, 2 packs would be 47 g.
+    // A food whose single pack is more than its max per day can't be used at all, e.g. rapeseed oil
+    // (900 g lasts 45 days at 20 g a day). Short periods make this more common (1.5 kg of oats is
+    // 214 g a day over 7 days, above its 100 g max).
     const unit = f.packGrams / settings.days;
     // Min rounds up to whole packs and max rounds down (the small 1e-9 stops
     // 99.99999 / 33.33333 becoming 2 instead of 3). If the user's own min and max
@@ -244,6 +265,8 @@ const Optimizer = (() => {
     // At least 10 different foods: every food's yes/no variable counts 1 (see the floor below)
     if (realistic) constraints.foodCount = { min: rules.minFoods };
 
+    // Groups stop a plan stacking similar foods, e.g. keso + kvarg + yoghurt + milk. Eggs aren't in
+    // dairy; bread and hönökaka aren't in dry grains (they're weighed ready to eat, the grains dry).
     // Food-group limits, e.g. dairy ≤ 700 g a day at 1,700 kcal: each food in the group
     // counts 1 per gram. The limits grow and shrink with the calories (kcalTarget ÷ 1,700).
     const groupMax = {};
@@ -307,6 +330,8 @@ const Optimizer = (() => {
       // Packages can only be bought whole
       if (packs) ints[name] = 1;
 
+      // The cheapest way to reach "10 foods" is often a few foods at the smallest amount allowed
+      // (e.g. one pack of potatoes). That's expected; watch whether it looks silly in real use.
       // The floor: the amount is either 0 or at least 35 g (or the food's own
       // minGramsIfUsed from foods.json, e.g. 10 g for fats; with packages, the
       // fewest packs that give that much). A linear model can't
@@ -593,6 +618,10 @@ const Optimizer = (() => {
     return problems;
   }
 
+  // Message rules: never just "no solution". Every message ends with something to do (add, raise,
+  // lower, use another plan). Suggested foods come from foods.json, never from names written in the
+  // code, and only ones not yet in My foods. If none fit, the message falls back to raising max limits.
+  // The user's own max and min limits are named, because they may be what's in the way.
   // The plan has no solution: work out why, in words (PLAN.md section 5).
   // Every message says what to change. help (optional):
   //   catalog    – every food in foods.json, to suggest foods that aren't in My foods yet
@@ -776,6 +805,11 @@ const Optimizer = (() => {
   // The answer is the cheapest plan found: usually the cheapest there is, sometimes a
   // few percent more.
 
+  // Speed: all three plans together take about 0.3 s (up to about 1 s on the first run) on a 2015
+  // laptop, and must stay under about 2 seconds on a phone (open test.html on the phone to check).
+  // Limit: with short periods (7–14 days), where one pack is a big step, and unusual splits, the
+  // search can find nothing even if a plan exists. A longer period or a wider tolerance helps.
+  //
   // How much a rule may be broken and still count as kept (rounding errors)
   const RULE_TOLERANCE = 1e-6;
   // Most repair or improve moves per starting point (a safety limit; normally far fewer)
@@ -1193,6 +1227,9 @@ const Optimizer = (() => {
     return result;
   }
 
+  // The cost order should be plan 1 ≤ plan 2 ≤ plan 3 ≤ budget, because each plan has the rules of
+  // the one before, plus more. Plan 1 is solved in grams and rounded up to packs afterwards, so in
+  // rare cases it costs more than plan 2. It could use whole packs too, if feedback asks for it.
   // All three plans for the same settings and ticked foods:
   //   { cheapest, realistic, highQuality }
   // groups are the food-group limits from data/groups.json (used by plans 2 and 3).

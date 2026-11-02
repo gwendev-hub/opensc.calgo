@@ -1,3 +1,8 @@
+// Everything saved in localStorage starts with "pbp.":
+//   pbp.settings – the goals; pbp.myFoods – a list of food ids; pbp.tab – the last open tab;
+//   pbp.theme – the appearance; pbp.limits – own limits, e.g. { "keso": { "min": 60, "max": 120 } };
+//   pbp.ticks – only from old versions, moved to pbp.myFoods and then removed.
+//
 // Key used to store the settings in the browser's localStorage
 const SETTINGS_KEY = "pbp.settings";
 
@@ -131,6 +136,9 @@ function updateThemeColor() {
   document.getElementById("theme-color").setAttribute("content", background);
 }
 
+// A small script in the <head> of index.html sets data-theme too, before anything is drawn, so a
+// dark page never flashes light. style.css has one light and one dark colour list; the dark one is
+// written twice (for System and for Dark), and test.html checks that the two copies are the same.
 // Use a choice: style.css reads data-theme; without it, System follows the phone.
 // Also marks the chosen button in the App section.
 function applyTheme(choice) {
@@ -258,6 +266,8 @@ function saveMyFoods() {
   }
 }
 
+// The starter set must give three valid plans with the default goals (test.html checks this).
+// Olive oil is in it because the other starter foods can't reach the fat goal in plan 3.
 // Which foods My foods starts with (a list of ids). Needs the foods to be loaded.
 function startingMyFoods() {
   // 1. Saved before: use that (an empty list counts, if the user removed everything)
@@ -290,6 +300,7 @@ function setupMyFoods() {
 
 // ---------- Own min/max per food (PLAN.md section 6, step 6) ----------
 
+// Only the limits of foods in My foods go to the optimizer, and changing them marks plans out of date.
 // Load the saved limits when the page starts. Keeps only known foods and real numbers ≥ 0.
 function setupLimits() {
   const saved = loadJson(LIMITS_KEY);
@@ -690,6 +701,9 @@ function pickResult(row) {
   row.insertAdjacentHTML("beforeend", '<span class="visually-hidden">(in My foods)</span>');
 }
 
+// How the list behaves: focusing opens every food; tapping a result adds it and keeps the list open,
+// so you can add several; Escape or a tap outside closes it (which also closes the phone keyboard).
+// On a phone the box scrolls to the top of the screen and the tab bar hides, so it can't cover the list.
 // Wire up the search box: open on focus, filter while typing, keys, taps, and closing
 function setupSearch() {
   const box = document.getElementById("food-search");
@@ -923,6 +937,10 @@ function planSwitchHtml() {
   return `<div class="plan-switch" role="group" aria-label="Plan">${buttons}</div>`;
 }
 
+// The pie and the kcal table are shares of protein × 4 + carbs × 4 + fat × 9 + fibre × 2, so they add
+// up to 100%. That total can differ a little from the label kcal on the plan cards, and the protein %
+// by a point or two from "% of calories from protein", which divides by the label kcal.
+// Monthly = per day × days and leaves the % alone; the goal table and the fibre range stay daily.
 // Build the Macros tab for one plan: plan switcher, Daily/Monthly toggle, pie, table and ranges
 function macroHtml(plan) {
   const switcher = planSwitchHtml();
@@ -1022,6 +1040,7 @@ function packSize(f) {
 // Packages to buy, e.g. "2 × 1 kg" or "3 × 12 eggs"
 const packsText = (item, f) => `${item.packages} × ${packSize(f)}`;
 
+// Deliberately nothing about leftovers from rounding up to whole packs: that was taken off the list.
 // Build the grocery table for one plan: food (with its badge), grams per day, packs, cost
 function groceryTableHtml(plan) {
   const rows = plan.items
@@ -1273,6 +1292,7 @@ let currentTab = null;
 // The tab the App settings page was opened from, for its back button
 let tabBeforeApp = "goals";
 
+// An old saved "settings" tab isn't in TABS any more, so it opens Goals, the tab it was renamed to.
 // Read the last open tab from localStorage ("goals" if none, or storage is blocked)
 function loadTab() {
   try {
@@ -1333,6 +1353,7 @@ function setSaveState(state) {
   button.classList.toggle("is-saved", state === "saved");
 }
 
+// Changes aren't saved while typing, so unsaved changes are gone after a reload.
 // The Save button: check the goals, save them, and offer to make the plans.
 // Nothing is saved while something's wrong.
 function saveGoals() {
