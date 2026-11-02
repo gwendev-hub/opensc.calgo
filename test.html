@@ -421,14 +421,14 @@
           }
           // app.js must not have its own copy of the rule any more
           checks.push(["app.js has no duplicate proteinRating (uses Optimizer.proteinRating)", typeof app.proteinRating === "undefined"]);
-          // Every badge on the real page must match the optimizer's rating
+          // On the real page exactly the foods rated Excellent have the green badge
           const badges = [...app.document.querySelectorAll("#food-list li")].map((li) => ({
             id: li.querySelector("input").dataset.id,
-            rating: ["excellent", "ok", "poor"].find((r) => li.querySelector(".badge").classList.contains(r)),
+            excellent: li.querySelector(".badge.excellent") !== null,
           }));
-          const wrong = badges.filter((b) => b.rating !== Optimizer.proteinRating(foods.find((f) => f.id === b.id)));
+          const wrong = badges.filter((b) => b.excellent !== (Optimizer.proteinRating(foods.find((f) => f.id === b.id)) === "excellent"));
           checks.push([
-            `page badges match Optimizer.proteinRating for all ${badges.length} foods` +
+            `the Excellent badge is on exactly the Excellent foods, for all ${badges.length} foods` +
               (wrong.length ? ` (wrong: ${wrong.map((b) => b.id).join(", ")})` : ""),
             badges.length === foods.length && wrong.length === 0,
           ]);
@@ -476,33 +476,40 @@
         },
       },
       {
-        title: "Lifts/dilutes and target density (app.js)",
+        title: "Protein labels: only the green Excellent badge",
         expected:
-          "Fixed 10 g / 100 kcal: keso and tuna lift; eggs, lentils, chickpeas, oats dilute. " +
-          "30% of 1,700 kcal → 7.5; protein 40% changes only the info line",
+          "Foods, search results and the grocery list show only the Excellent badge; no OK or Poor badges, no lifts/dilutes labels or info line. " +
+          "The list says \"X% of your protein comes from Excellent sources\", with no breakdown. The ratings still drive the optimizer",
         async run(app) {
-          const checks = [];
-          const byId = (id) => foods.find((f) => f.id === id);
-          // Fixed lifts/dilutes labels
-          for (const id of ["keso", ...TUNA]) {
-            const got = app.liftsOrDilutes(byId(id));
-            checks.push([`${id} lifts (got "${got}")`, got === "lifts"]);
-          }
-          for (const id of ["eggs", "lentils_red", "chickpeas_can", "oats"]) {
-            const got = app.liftsOrDilutes(byId(id));
-            checks.push([`${id} dilutes (got "${got}")`, got.startsWith("dilutes")]);
-          }
-          // Target density, as a pure calculation
-          const density = app.targetDensity(DEFAULTS).toFixed(1);
-          checks.push([`target density 30% of 1,700 kcal = 7.5 (got ${density})`, density === "7.5"]);
-
-          // On the real page: change protein from 30% to 40% and see what changes
-          const page = await pageChange(app, 40);
-          checks.push([`info line: ${page.before.info} → ${page.after.info} (expected 7.5 → 10.0)`,
-            page.before.info === "7.5" && page.after.info === "10.0"]);
-          checks.push([`no food label changed (${page.after.labels.length} labels compared)`,
-            page.after.labels.length > 0 && page.after.labels.join() === page.before.labels.join()]);
-          return { checks };
+          const doc = app.document;
+          const page = await pagePlansOnce(app);
+          const three = scenarios.three();
+          // Open the search list for a moment to read its rows
+          app.openResults();
+          const rows = [...doc.querySelectorAll(".food-result")];
+          const rowsOk = rows.length === foods.length && rows.every((r) =>
+            (r.querySelector(".badge.excellent") !== null) === (Optimizer.proteinRating(foods.find((f) => f.id === r.dataset.id)) === "excellent"));
+          app.closeResults();
+          const foodsText = doc.getElementById("panel-foods").textContent;
+          const nonExcellent = foods.filter((f) => Optimizer.proteinRating(f) !== "excellent");
+          // The rule itself still counts: a set with only OK and Poor foods has no plan
+          const noExcellent = Optimizer.plan(DEFAULTS, nonExcellent, foods);
+          return {
+            checks: [
+              ["no OK or Poor badge anywhere on the page", doc.querySelectorAll(".badge.ok, .badge.poor").length === 0],
+              [`search results: the badge is on exactly the Excellent foods (${rows.length} rows)`, rowsOk],
+              ["the Foods tab has no lifts/dilutes labels", !/\b(lifts|dilutes?)\b/i.test(foodsText)],
+              ["the info line and its functions are gone",
+                !doc.getElementById("target-density") && typeof app.liftsOrDilutes === "undefined" && typeof app.targetDensity === "undefined"],
+              [`list says: "${page.first.proteinShare}"`,
+                page.first.proteinShare === `${Math.round(three.realistic.quality.proteinShare.excellent * 100)}% of your protein comes from Excellent sources.`],
+              ["no Excellent/OK/Poor breakdown or bar in the list", !page.first.hasBreakdown],
+              ["no \"gives X% of your calories\" warning in the list", !page.first.hasPoorWarning],
+              ["the internal rating is unchanged (eggs OK, rice Poor, keso Excellent)",
+                ["eggs", "rice", "keso"].map((id) => Optimizer.proteinRating(foods.find((f) => f.id === id))).join() === "ok,poor,excellent"],
+              ["the optimizer's Excellent rule still applies", noExcellent.status === "infeasible" && noExcellent.problems.some((x) => x.code === "excellent")],
+            ],
+          };
         },
       },
       {
@@ -744,7 +751,7 @@
           const rowsOk = (key, rows) => three[key].status === "optimal" && rows === three[key].items.length;
           return {
             checks: [
-              [`tapping each tab shows only its panel: ${page.tabsShown.join(", ")}`, page.tabsShown.join() === "settings,foods,plans,macros"],
+              [`tapping each tab shows only its panel: ${page.tabsShown.join(", ")}`, page.tabsShown.join() === "goals,foods,plans,macros"],
               ["there is no List tab or panel any more", !page.hasListTab],
               ["tab bar buttons are at least 44 px tall", page.tabHeights.every((h) => h >= 44)],
               [`still on the Plans tab after pressing the button (open: ${page.tabAfterRun})`, page.tabAfterRun === "plans"],
@@ -753,9 +760,10 @@
               [`each card shows cost vs budget, protein, kcal, % Excellent and food count`, page.cardsHaveStats],
               [`list heading: "${page.first.heading}"`, page.first.heading === "Cheapest realistic"],
               [`list has ${page.first.rows} foods (optimizer: ${three.realistic.items ? three.realistic.items.length : "–"})`, rowsOk("realistic", page.first.rows)],
-              ["every row has a rating badge", page.first.badges === page.first.rows],
+              [`only the Excellent foods have a badge (${page.first.badges})`,
+                page.first.badges === three.realistic.items.filter((i) => i.rating === "excellent").length],
               [`total shown: ${page.first.total}`, page.first.total === `${Math.round(three.realistic.totals.shoppingCost).toLocaleString("en-GB")} kr`],
-              ["protein quality section with coloured bar", page.first.hasQuality],
+              ["protein quality section says how much is from Excellent", /Protein quality/.test(page.first.text) && Boolean(page.first.proteinShare)],
               ["the grocery list is on the Plans tab, below the cards", page.listUnderCards],
               ["the Plans tab has no macro pie, table or toggle", !page.first.hasMacros && !page.afterTap.hasMacros],
               [`after tapping Absolute cheapest: "${page.afterTap.heading}", ${page.afterTap.rows} foods`,
@@ -764,6 +772,7 @@
               [`tapping the card stays on the Plans tab (open: ${page.afterTap.tab})`, page.afterTap.tab === "plans"],
               [`open tab remembered in localStorage ("${page.afterTap.savedTab}")`, page.afterTap.savedTab === "plans"],
               [`an old saved "list" tab opens Plans (got "${page.oldListTab}")`, page.oldListTab === "plans"],
+              [`an old saved "settings" tab opens Goals (got "${page.oldSettingsTab}")`, page.oldSettingsTab === "goals"],
               ["no 'out of date' dot before any change", !page.dotBefore],
               ["changing a setting shows the dot on the Plans tab", page.dotAfter],
               ["changing a setting shows the 'out of date' note", page.staleShown],
@@ -924,7 +933,7 @@
           const whole = (n) => Math.round(n).toLocaleString("en-GB");
           const sw = page.switcher;
           const checks = [
-            [`tab bar order: ${page.tabOrder.join(", ")}`, page.tabOrder.join() === "settings,foods,plans,macros"],
+            [`tab bar order: ${page.tabOrder.join(", ")}`, page.tabOrder.join() === "goals,foods,plans,macros"],
             ["Macros tab button has its own icon", page.macrosHasIcon],
             [`switcher buttons: ${sw.buttons.join(", ")}`, sw.buttons.join() === THREE.join()],
             [`switcher labels: ${sw.labels.join(" / ")}`, sw.labels.join() === THREE.map((k) => three[k].title).join()],
@@ -980,7 +989,7 @@
             ["focusing the search opens the list", page.openOnFocus],
             [`the list shows every food (${page.allRows} of ${foods.length})`, page.allRows === foods.length],
             ["every row shows its category", page.categoriesOk],
-            ["every row's protein badge matches Optimizer.proteinRating", page.badgesOk],
+            ["only the Excellent foods' rows have the protein badge", page.badgesOk],
             [`typing "tonfisk" filters live to: ${page.filtered.join(", ")}`, page.filtered.join() === "tuna_can,tuna_frozen"],
             ["Escape closes the list", page.closedByEscape],
             ["tapping inside the list keeps it open", page.openAfterInsideTap],
@@ -1159,8 +1168,8 @@
       {
         title: "Copy list",
         expected:
-          "The text is grouped by category in foods.json order, one line per food (\"Keso 4% 250 g – 7 packs – 154 kr\", " +
-          "pieces for eggs, no double pack size), then the total cost and protein/kcal per day. The button on the page " +
+          "The text is grouped by category in foods.json order, one line per food in the Packs column's style " +
+          "(\"Eggs – 3 × 12 eggs – 135 kr\", no double pack size), then the total cost and protein/kcal per day. The button on the page " +
           "copies the selected plan and says \"Copied ✓\"",
         async run(app) {
           // A hand-made plan, so the exact text can be written out here
@@ -1168,26 +1177,26 @@
             title: "Test plan",
             items: [
               { id: "keso", packages: 7, cost: 154, piecesToBuy: null },
-              { id: "eggs", packages: 2, cost: 90, piecesToBuy: 24 },
+              { id: "eggs", packages: 3, cost: 135, piecesToBuy: 36 },
               { id: "barebells", packages: 1, cost: 23, piecesToBuy: 1 },
               { id: "rice", packages: 1, cost: 30, piecesToBuy: null },
             ],
-            totals: { shoppingCost: 297, budget: 4000, proteinPerDay: 112.4, kcalPerDay: 1690.2 },
+            totals: { shoppingCost: 342, budget: 4000, proteinPerDay: 112.4, kcalPerDay: 1690.2 },
           };
           const want = [
             "Test plan – 30 days",
             "",
             "Eggs & dairy",
-            "Eggs (12 × 60 g) 720 g – 2 packs (24 pcs) – 90 kr",
-            "Keso 4% 250 g – 7 packs – 154 kr",
+            "Eggs – 3 × 12 eggs – 135 kr",
+            "Keso 4% – 7 × 250 g – 154 kr",
             "",
             "Grains & bread",
-            "Rice, dry 1,000 g – 1 pack – 30 kr",
+            "Rice, dry – 1 × 1 kg – 30 kr",
             "",
             "Snacks & fats",
-            "Barebells bar 55 g – 1 pack – 23 kr",
+            "Barebells bar – 1 × 55 g – 23 kr",
             "",
-            "Total: 297 kr (budget 4,000 kr)",
+            "Total: 342 kr (budget 4,000 kr)",
             "Per day: 112 g protein · 1,690 kcal",
           ].join("\n");
           const got = app.copyListText(fake, 30);
@@ -1203,6 +1212,14 @@
               ["hand-made plan gives exactly the expected text" + (firstDiff !== undefined ? ` (first different line: "${firstDiff}")` : ""),
                 got === want],
               ["the button copies the selected plan (Cheapest realistic)", page.copied === wantPage],
+              ["every food's line has exactly what its Packs column shows",
+                expected.items.every((i) => {
+                  const f = foods.find((x) => x.id === i.id);
+                  return lines.includes(`${app.shortName(f)} – ${i.packages} × ${app.packSize(f)} – ${Math.round(i.cost).toLocaleString("en-GB")} kr`);
+                })],
+              [`names lose only pack details: "${["eggs", "avocado", "quest_chips", "prastost"].map((id) => app.shortName(foods.find((f) => f.id === id))).join('", "')}"`,
+                ["eggs", "avocado", "quest_chips", "prastost"].map((id) => app.shortName(foods.find((f) => f.id === id))).join()
+                  === "Eggs,Avocado,Quest protein chips,Hard cheese (prästost)"],
               [`it starts with the plan's name ("${lines[0]}")`, lines[0] === "Cheapest realistic – 30 days"],
               [`it ends with the total and the daily protein/kcal ("${lines.slice(-2).join(" | ")}")`,
                 /^Total: [\d,]+ kr \(budget 4,000 kr\)$/.test(lines[lines.length - 2]) &&
@@ -1563,6 +1580,162 @@
           };
         },
       },
+      {
+        title: "Appearance: the choice is saved and used",
+        expected:
+          "System by default; Dark and Light set the page's theme and survive a reload; System removes the override; an unknown saved value " +
+          "counts as System. The dark colours for System and Dark are the same list, and every colour in style.css comes from it",
+        async run(app) {
+          const page = await pageTheme(app);
+          return {
+            checks: [
+              [`nothing saved: System is chosen (${page.first.pressed}), no override on the page`, page.first.pressed === "system" && page.first.attr === null],
+              [`Dark: page theme "${page.dark.attr}", saved "${page.dark.saved}"`, page.dark.attr === "dark" && page.dark.saved === "dark"],
+              [`Dark after a reload: page theme "${page.darkReload.attr}", ${page.darkReload.pressed} marked`, page.darkReload.attr === "dark" && page.darkReload.pressed === "dark"],
+              [`Dark really changes the colours (background ${page.darkReload.bg})`, page.darkReload.bg === "#161615"],
+              ["the browser bar follows the background", page.darkReload.barColor === "#161615"],
+              [`Light after a reload: page theme "${page.lightReload.attr}", background ${page.lightReload.bg}`, page.lightReload.attr === "light" && page.lightReload.bg === "#f5f5f2"],
+              [`System: no override, saved "${page.system.saved}", still after a reload`, page.system.attr === null && page.system.saved === "system" && page.systemReload.pressed === "system"],
+              ["an unknown saved value counts as System", page.bad.pressed === "system" && page.bad.attr === null],
+              ["the System (phone) and Dark colour lists are identical", page.css.sameLists],
+              [`dark sets every light colour (missing: ${page.css.missing.join(", ") || "none"})`, page.css.missing.length === 0],
+              [`no fixed colours outside the lists (${page.css.fixed.join(", ") || "none"})`, page.css.fixed.length === 0],
+            ],
+          };
+        },
+      },
+      {
+        title: "Dark mode: readable on every tab",
+        expected:
+          "At 360 px in Dark and Light, on Goals, App settings, Foods (with an editor and the search open), Plans and Macros: all text and input text has a " +
+          "contrast of at least 4.5:1 with what's behind it. In Dark the pie, swatches and dot are at least 3:1 against the card",
+        async run(app) {
+          const page = await pagePhoneOnce(app);
+          const checks = [];
+          for (const theme of ["dark", "light"]) {
+            for (const [state, result] of Object.entries(page[theme])) {
+              checks.push([`${theme}, ${state}: ${result.textCount} texts` +
+                (result.contrast.length ? ` – too low: ${result.contrast.slice(0, 5).join("; ")}` : ""),
+                result.contrast.length === 0 && result.textCount > 0]);
+            }
+          }
+          checks.push([`dark: chart colours against the card` + (page.chartColors.length ? ` – too low: ${page.chartColors.join("; ")}` : ""), page.chartColors.length === 0]);
+          return { checks };
+        },
+      },
+      {
+        title: "360 px wide: no sideways scrolling, tap targets ≥ 44 px",
+        expected:
+          "On every tab at 360 px: the page doesn't scroll sideways, nothing sticks out past the screen, and every button, input, select and " +
+          "food row is at least 44 × 44 px, also with the search, a min/max editor and the Clear my data step open",
+        async run(app) {
+          const page = await pagePhoneOnce(app);
+          const checks = [];
+          for (const [state, result] of Object.entries(page.dark)) {
+            checks.push([`${state}: width ${result.scrollWidth} px` + (result.sticksOut.length ? `, sticks out: ${result.sticksOut.slice(0, 5).join(", ")}` : ""),
+              result.scrollWidth <= 360 && result.sticksOut.length === 0]);
+            checks.push([`${state}: ${result.targetCount} tap targets` + (result.small.length ? `, too small: ${result.small.slice(0, 5).join(", ")}` : ""),
+              result.targetCount > 0 && result.small.length === 0]);
+          }
+          return { checks };
+        },
+      },
+      {
+        title: "Clear my data",
+        expected:
+          "The first tap only shows a question on the page (no browser popup) and Cancel changes nothing. \"Yes\" removes only this app's keys and " +
+          "the app is back to the first-visit state: starter foods, default settings, System, no own limits. Other apps' keys stay",
+        async run(app) {
+          const page = await pageClear(app);
+          const starters = foods.filter((f) => f.starter === true).map((f) => f.id);
+          const same = (a, b) => a.slice().sort().join() === b.slice().sort().join();
+          return {
+            checks: [
+              ["the first tap shows the question and hides the button", page.asked.questionShown && page.asked.buttonHidden],
+              ["…and nothing is removed yet", page.asked.keysKept],
+              ["Cancel hides the question and keeps everything", page.cancelled.questionHidden && page.cancelled.keysKept],
+              [`no browser popup was used (${page.popups} calls)`, page.popups === 0],
+              [`after Yes, saved data left: ${page.after.keys.join(", ") || "none"}`, page.after.keys.every((k) => ["pbp.myFoods", "pbp.tab"].includes(k))],
+              ["another app's key on the same address stays", page.after.otherKey === "keep me"],
+              [`My foods is the ${page.after.shown.length} starter foods`, same(page.after.shown, starters)],
+              [`settings are the defaults: ${page.after.fields}`, page.after.fields === "4000 kr, 1700 kcal, 30/45/25, ±10, 30 days"],
+              ["appearance is back to System", page.after.themeAttr === null && page.after.themePressed === "system"],
+              ["no plans and no own limits are left", page.after.plansEmpty && !page.after.ownLimits],
+              ["it says the data was cleared, on the App settings page", page.after.noteShown && page.after.onAppPage],
+              ["…only once: the next reload opens Goals without it", !page.afterNextReload.noteShown && page.afterNextReload.onGoals],
+            ],
+          };
+        },
+      },
+      {
+        title: "App settings page",
+        expected:
+          "A ⚙️ button in the top-right corner on every tab opens a page with Appearance, the data line, Clear my data and About; it isn't in the tab bar, " +
+          "Goals doesn't contain it, and Back returns to the tab it was opened from",
+        async run(app) {
+          const page = await pageAppSettings(app);
+          const doc = app.document;
+          const card = doc.querySelector(".app-card");
+          const prices = doc.getElementById("price-source").textContent;
+          const sources = [...new Set(foods.map((f) => f.priceSource))];
+          return {
+            checks: [
+              ["the ⚙️ button isn't in the tab bar, which has just the four tabs",
+                !doc.querySelector(".tab-bar #open-app") && [...doc.querySelectorAll(".tab-bar .tab")].map((t) => t.dataset.tab).join() === "goals,foods,plans,macros"],
+              [`⚙️ shows on every tab: ${page.gearShown.join(", ")}`, page.gearShown.join() === "true,true,true,true"],
+              ["it's labelled for screen readers", doc.getElementById("open-app").getAttribute("aria-label") === "App settings"],
+              [`it opens only the App settings page, from every tab: ${page.opened.join(", ")}`, page.opened.join() === "app,app,app,app"],
+              [`Back returns to where it came from: ${page.back.join(", ")}`, page.back.join() === "goals,foods,plans,macros"],
+              ["while it's open: no tab is marked and the ⚙️ is hidden", page.whileOpen.noActiveTab && page.whileOpen.gearHidden],
+              ["a tab in the tab bar also leaves the page", page.leaveByTab === "plans" && page.gearBack],
+              ["the open tab stays remembered, so a reload doesn't open App settings", page.savedTab === "macros" && page.reloadedOn === "macros"],
+              ["Goals no longer holds any of it", !doc.getElementById("panel-goals").contains(card) && doc.getElementById("panel-app").contains(card)],
+              ["the data line, word for word", doc.getElementById("privacy-line").textContent === "Your data stays on this phone. Nothing is sent anywhere."],
+              [`version ${doc.getElementById("app-version").textContent}`, /^\d+\.\d+\.\d+$/.test(doc.getElementById("app-version").textContent)],
+              [`prices: "${prices}"`, sources.length > 0 && sources.every((source) => prices.includes(source))],
+              ["“Not medical advice”", /Not medical advice/.test(card.textContent)],
+              ["System, Light and Dark buttons", [...card.querySelectorAll("[data-theme-choice]")].map((b) => b.textContent).join() === "System,Light,Dark"],
+              ["Clear my data is here", card.contains(doc.getElementById("clear-data"))],
+            ],
+          };
+        },
+      },
+      {
+        title: "Goals tab: Save, Saved ✓, Save changes",
+        expected:
+          "The tab is called Goals. Save checks the % add up to 100 and saves nothing otherwise; a good save says \"Saved ✓\" and shows \"Create my grocery list →\", " +
+          "which opens Plans and makes the plans. Changing anything says \"Save changes\", hides that button and marks plans out of date. Typing alone saves nothing",
+        async run(app) {
+          const page = await pageSave(app);
+          return {
+            checks: [
+              [`tab label: "${page.tabLabel}", heading: "${page.heading}"`, page.tabLabel === "Goals" && page.heading === "Goals"],
+              [`first visit: the button says "${page.first.label}", no Create button`, page.first.label === "Save" && !page.first.createShown],
+              ["typing doesn't save anything", page.typed.saved === null],
+              [`before the first save it still says "${page.typed.label}"`, page.typed.label === "Save"],
+              [`% adding up to 105: error "${page.bad.error}"`, /100%/.test(page.bad.error)],
+              ["…nothing is saved, no Saved ✓ and no Create button", page.bad.saved === null && page.bad.label === "Save" && !page.bad.createShown],
+              ["fixing the % removes the error", page.fixed.error === ""],
+              [`good save: "${page.good.label}" and "${page.good.createText}"`, page.good.label === "Saved ✓" && page.good.createShown && page.good.createText === "Create my grocery list →"],
+              ["…the goals are saved", page.good.saved && page.good.saved.fatPct === 25 && page.good.saved.budget === 3333],
+              ["Enter or Go on the keyboard saves too, without reloading the page", page.enterSaved],
+              [`after a save, reloading says "${page.reloaded.label}" with the saved goals, no Create button yet`,
+                page.reloaded.label === "Saved ✓" && page.reloaded.budget === "3333" && !page.reloaded.createShown],
+              [`a change says "${page.changed.label}" and hides the Create button`, page.changed.label === "Save changes" && !page.changed.createShown],
+              ["…the saved goals stay as they were until Save", page.changed.savedBudget === 3333],
+              ["…a preset counts as a change too", page.presetChanged === "Save changes"],
+              ["…unsaved changes are gone after a reload", page.unsavedGone === "3333"],
+              ["Create opens the Plans tab", page.created.tab === "plans"],
+              [`…and makes the three plans (${page.created.cards} cards)`, page.created.cards === 3],
+              ["plans made: no out-of-date note or dot", !page.created.staleShown && !page.created.dotShown],
+              ["changing a goal after that marks the plans out of date", page.stale.staleShown && page.stale.dotShown && page.stale.label === "Save changes"],
+              [`pressing Make on Plans with unsaved changes uses and saves them ("${page.madeUnsaved.label}", ${page.madeUnsaved.savedBudget} kr)`,
+                page.madeUnsaved.label === "Saved ✓" && page.madeUnsaved.savedBudget === 4444 && !page.madeUnsaved.staleShown],
+              ["…and a bad split there shows the error and makes nothing", /100%/.test(page.badMake.error) && page.badMake.savedBudget === 4444],
+            ],
+          };
+        },
+      },
     ];
 
     // Every rule of plan 2 or 3 that a plan breaks, as short texts ([] if none).
@@ -1652,7 +1825,7 @@
         const all = rows();
         const foodOfRow = (row) => foods.find((f) => f.id === row.dataset.id);
         const categoriesOk = all.every((r) => r.querySelector(".result-category").textContent === foodOfRow(r).category);
-        const badgesOk = all.every((r) => r.querySelector(".badge").classList.contains(Optimizer.proteinRating(foodOfRow(r))));
+        const badgesOk = all.every((r) => (r.querySelector(".badge.excellent") !== null) === (Optimizer.proteinRating(foodOfRow(r)) === "excellent"));
         const rowHeight = all.length ? parseFloat(app.getComputedStyle(all[0]).minHeight) : 0;
         const inputHeight = parseFloat(app.getComputedStyle(input).minHeight);
 
@@ -1971,7 +2144,10 @@
           rows: detail.querySelectorAll(".grocery tbody tr").length,
           badges: detail.querySelectorAll(".grocery tbody .badge").length,
           total: total ? total.textContent : "",
-          hasQuality: Boolean(detail.querySelector(".quality-bar .bar-part")) && /Protein quality/.test(detail.textContent),
+          text: detail.textContent,
+          proteinShare: (detail.querySelector(".protein-share") || {}).textContent,
+          hasBreakdown: Boolean(detail.querySelector(".quality-bar, .legend")) || /\b(OK|Poor) \d+%/.test(detail.textContent),
+          hasPoorWarning: /gives \d+% of your calories/.test(detail.textContent),
           hasMacros: Boolean(doc.querySelector("#panel-plans .macro-pie, #panel-plans .macro-table, #panel-plans [data-macro-period]")),
         };
       };
@@ -1984,7 +2160,7 @@
 
       try {
         // Tap each tab and see which panel is shown
-        const tabsShown = ["settings", "foods", "plans", "macros"].map((name) => {
+        const tabsShown = ["goals", "foods", "plans", "macros"].map((name) => {
           tapTab(name);
           return openTab();
         });
@@ -1996,6 +2172,9 @@
         // Someone whose last open tab was the old List tab gets Plans
         app.localStorage.setItem("pbp.tab", "list");
         const oldListTab = app.loadTab();
+        // …and the old Settings tab is now called Goals
+        app.localStorage.setItem("pbp.tab", "settings");
+        const oldSettingsTab = app.loadTab();
 
         // Default settings and every food in My foods, so the page matches scenarios.three()
         setInput("budget", DEFAULTS.budget);
@@ -2094,7 +2273,7 @@
         return {
           tabsShown, tabHeights, tabAfterRun, cards: cards.map((c) => c.dataset.key), cardsHaveStats,
           selectedAtStart, first, afterTap, dotBefore, dotAfter, staleShown, macroDay, macroMonth,
-          tabOrder, macrosHasIcon, switcher, hasListTab, oldListTab, listUnderCards,
+          tabOrder, macrosHasIcon, switcher, hasListTab, oldListTab, oldSettingsTab, listUnderCards,
         };
       } finally {
         // Put the user's own saved settings and ticks back
@@ -2126,38 +2305,6 @@
         if (p.status !== "optimal") html += `<p class="bad">${esc(p.title)}: ${esc(p.messages.join(" "))}</p>`;
       }
       return html;
-    }
-
-    // Type protein % values into the hidden page and read the info line and food labels.
-    // The page saves settings to localStorage when they change, so the real saved
-    // settings are put back afterwards.
-    async function pageChange(app, newProtein) {
-      const doc = app.document;
-      const saved = app.localStorage.getItem("pbp.settings");
-      // Set an input and fire the same event typing would
-      const setInput = (id, value) => {
-        const input = doc.getElementById(id);
-        input.value = value;
-        input.dispatchEvent(new app.Event("input", { bubbles: true }));
-      };
-      // What the page shows right now
-      const read = () => ({
-        info: doc.getElementById("target-density").textContent,
-        labels: [...doc.querySelectorAll(".food-stats .lifts, .food-stats .dilutes")].map(
-          (el) => el.closest("li").querySelector("input").dataset.id + ":" + el.className),
-      });
-      try {
-        setInput("kcal", 1700);
-        setInput("proteinPct", 30);
-        const before = read();
-        setInput("proteinPct", newProtein);
-        const after = read();
-        return { before, after };
-      } finally {
-        // Put the user's own saved settings back
-        if (saved === null) app.localStorage.removeItem("pbp.settings");
-        else app.localStorage.setItem("pbp.settings", saved);
-      }
     }
 
     // Try out the settings form on the hidden page: grams, presets, the 100% error and a
@@ -2245,6 +2392,465 @@
       }
     }
 
+    // Test 47: use the Appearance buttons on the hidden page and reload it. The saved choice is put back.
+    async function pageTheme(app) {
+      const saved = localStorage.getItem("pbp.theme");
+      // What the page shows right now (doc changes after each reload, so it's read each time)
+      const read = (win) => {
+        const root = win.document.documentElement;
+        return {
+          attr: root.getAttribute("data-theme"),
+          saved: localStorage.getItem("pbp.theme"),
+          pressed: win.document.querySelector('[data-theme-choice][aria-pressed="true"]').dataset.themeChoice,
+          bg: win.getComputedStyle(root).getPropertyValue("--bg").trim(),
+          barColor: win.document.getElementById("theme-color").getAttribute("content"),
+        };
+      };
+      const tap = (win, choice) => {
+        win.document.querySelector(`[data-theme-choice="${choice}"]`).click();
+        return read(win);
+      };
+      try {
+        localStorage.removeItem("pbp.theme");
+        let win = await reloadApp();
+        const first = read(win);
+        const dark = tap(win, "dark");
+        win = await reloadApp();
+        const darkReload = read(win);
+        tap(win, "light");
+        win = await reloadApp();
+        const lightReload = read(win);
+        const system = tap(win, "system");
+        win = await reloadApp();
+        const systemReload = read(win);
+        localStorage.setItem("pbp.theme", "purple");
+        win = await reloadApp();
+        const bad = read(win);
+        return { first, dark, darkReload, lightReload, system, systemReload, bad, css: themeCss(win) };
+      } finally {
+        if (saved === null) localStorage.removeItem("pbp.theme");
+        else localStorage.setItem("pbp.theme", saved);
+        await reloadApp();
+      }
+    }
+
+    // Compare the colour lists in style.css, and look for fixed colours outside them
+    function themeCss(win) {
+      const rules = [...[...win.document.styleSheets].find((sheet) => (sheet.href || "").endsWith("style.css")).cssRules];
+      const media = rules.find((r) => r.media && /prefers-color-scheme: dark/.test(r.media.mediaText));
+      const followsPhone = media.cssRules[0];
+      const alwaysDark = rules.find((r) => r.selectorText === ':root[data-theme="dark"]');
+      const light = rules.find((r) => r.selectorText === ":root");
+      const names = (rule) => [...rule.style].filter((n) => n.startsWith("--"));
+      // Everything that's only about layout doesn't need a dark value
+      const missing = names(light).filter((n) => n !== "--radius" && !names(alwaysDark).includes(n));
+      const fixed = [];
+      const look = (list) => {
+        for (const rule of list) {
+          if (rule.cssRules) look(rule.cssRules);
+          else if (rule.style && !(rule.selectorText || "").startsWith(":root") && /(#[0-9a-f]{3,8}\b|rgba?\()/i.test(rule.style.cssText)) {
+            fixed.push(rule.selectorText);
+          }
+        }
+      };
+      look(rules);
+      return { sameLists: followsPhone.style.cssText === alwaysDark.style.cssText && alwaysDark.style.length > 0, missing, fixed };
+    }
+
+    // WCAG contrast between two colours given as [r, g, b]
+    function contrastOf(a, b) {
+      const light = (c) => {
+        const [r, g, v] = c.map((x) => {
+          const n = x / 255;
+          return n <= 0.03928 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * v;
+      };
+      const [hi, lo] = [light(a), light(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    }
+
+    // "rgb(1, 2, 3)" or "rgba(1, 2, 3, 0.5)" → [1, 2, 3, alpha]
+    function parseColor(text) {
+      const parts = text.match(/[\d.]+/g).map(Number);
+      return [parts[0], parts[1], parts[2], parts.length > 3 ? parts[3] : 1];
+    }
+
+    // Read everything the phone tests need for what the page shows right now:
+    // contrast of all visible text, sideways overflow and the size of the tap targets
+    function readPhoneState(win) {
+      const doc = win.document;
+      const visible = (el) => el.getClientRects().length > 0 && win.getComputedStyle(el).visibility !== "hidden" && !el.closest(".visually-hidden");
+      const label = (el) => `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""}${el.className && typeof el.className === "string" ? "." + el.className.split(" ")[0] : ""}`;
+
+      // The background behind an element and how see-through it is, by walking up its parents
+      const behind = (el) => {
+        let opacity = 1;
+        let color = null;
+        for (let node = el; node; node = node.parentElement) {
+          const style = win.getComputedStyle(node);
+          opacity *= Number(style.opacity);
+          if (!color) {
+            const c = parseColor(style.backgroundColor);
+            if (c[3] > 0) color = c;
+          }
+        }
+        return { color: color || [255, 255, 255, 1], opacity };
+      };
+
+      const contrast = [];
+      let textCount = 0;
+      for (const el of doc.body.querySelectorAll("*")) {
+        if (["SCRIPT", "STYLE"].includes(el.tagName) || !visible(el)) continue;
+        const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+        if (!hasText && !["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName)) continue;
+        if (el.type === "checkbox") continue;
+        textCount++;
+        const { color: bg, opacity } = behind(el);
+        const fg = parseColor(win.getComputedStyle(el).color);
+        const mixed = fg.slice(0, 3).map((x, i) => x * opacity + bg[i] * (1 - opacity));
+        const ratio = contrastOf(mixed, bg.slice(0, 3));
+        if (ratio < 4.5) contrast.push(`${label(el)} "${el.textContent.trim().slice(0, 20)}" ${ratio.toFixed(2)}`);
+      }
+
+      // Anything that sticks out past the right or left edge of the screen
+      const sticksOut = [];
+      for (const el of doc.body.querySelectorAll("*")) {
+        if (!visible(el)) continue;
+        const r = el.getBoundingClientRect();
+        if (r.right > 360.5 || r.left < -0.5) sticksOut.push(`${label(el)} (${Math.round(r.left)}–${Math.round(r.right)})`);
+      }
+
+      // Everything you tap. A checkbox's tap area is the label around it.
+      const small = [];
+      const targets = [...doc.querySelectorAll("button, a[href], select, input:not([type=checkbox]), .food-tick, .food-result")].filter(visible);
+      for (const el of targets) {
+        const r = el.getBoundingClientRect();
+        if (r.height < 43.5 || r.width < 43.5) small.push(`${label(el)} ${Math.round(r.width)}×${Math.round(r.height)}`);
+      }
+      return { textCount, contrast, scrollWidth: doc.documentElement.scrollWidth, sticksOut, targetCount: targets.length, small };
+    }
+
+    // Tests 48 and 49: a real 360 px wide page, placed off screen, driven through every tab
+    // in both themes. All saved data is put back afterwards.
+    let pagePhonePromise = null;
+    function pagePhoneOnce(app) {
+      if (!pagePhonePromise) pagePhonePromise = pagePhone(app);
+      return pagePhonePromise;
+    }
+    async function pagePhone() {
+      const savedData = {};
+      for (const key of Object.keys(localStorage)) if (key.startsWith("pbp.")) savedData[key] = localStorage.getItem(key);
+      const frame = document.createElement("iframe");
+      frame.style.cssText = "position:fixed;left:-10000px;top:0;width:360px;height:740px;border:0";
+      try {
+        // Every food, and a budget that gives an over-budget plan and a "not possible" plan to look at too
+        localStorage.setItem("pbp.myFoods", JSON.stringify(foods.map((f) => f.id)));
+        localStorage.removeItem("pbp.limits");
+        localStorage.setItem("pbp.settings", JSON.stringify({ ...DEFAULTS, budget: LOW_BUDGET }));
+        localStorage.setItem("pbp.tab", "goals");
+        await new Promise((resolve) => { frame.onload = resolve; frame.src = "index.html"; document.body.appendChild(frame); });
+        const win = frame.contentWindow;
+        const doc = win.document;
+        const started = Date.now();
+        while (doc.getElementById("food-search-input").disabled) {
+          if (Date.now() - started > 8000) throw new Error("the 360 px page didn't load");
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        await win.makeGroceryList();
+
+        const runTheme = async (theme) => {
+          win.applyTheme(theme);
+          const states = {};
+          win.showTab("goals");
+          states.Goals = readPhoneState(win);
+          // The red errors: a split that doesn't add up, and pressing Save with it
+          const fat = doc.getElementById("fatPct");
+          fat.value = 30;
+          fat.dispatchEvent(new win.Event("input", { bubbles: true }));
+          win.saveGoals();
+          states["Goals with the errors"] = readPhoneState(win);
+          fat.value = DEFAULTS.fatPct;
+          fat.dispatchEvent(new win.Event("input", { bubbles: true }));
+          // "Save changes", then "Saved ✓" with "Create my grocery list →" under it
+          states["Goals, Save changes"] = readPhoneState(win);
+          win.saveGoals();
+          states["Goals, saved"] = readPhoneState(win);
+
+          // App settings, also with the Clear my data question and its note
+          win.showTab("app");
+          states["App settings"] = readPhoneState(win);
+          win.showClearConfirm(true);
+          doc.getElementById("clear-done").hidden = false;
+          states["App settings with the Clear question"] = readPhoneState(win);
+          doc.getElementById("clear-done").hidden = true;
+          win.showClearConfirm(false);
+
+          win.showTab("foods");
+          states.Foods = readPhoneState(win);
+          // An open min/max editor, then the open search list
+          win.toggleLimitEditor("keso");
+          states["Foods with a min/max editor"] = readPhoneState(win);
+          win.toggleLimitEditor("keso");
+          win.openResults();
+          states["Foods with the search open"] = readPhoneState(win);
+          win.closeResults();
+
+          // Plans: each plan's list; the budget makes the out-of-date note, ✘ and "not possible" show too
+          win.showTab("plans");
+          for (const key of ["cheapest", "realistic", "highQuality"]) {
+            win.selectPlan(key);
+            states[`Plans, ${key}`] = readPhoneState(win);
+          }
+          win.showTab("macros");
+          for (const key of ["cheapest", "realistic", "highQuality"]) {
+            win.selectPlan(key);
+            states[`Macros, ${key}`] = readPhoneState(win);
+          }
+          win.selectPlan("cheapest");
+          return states;
+        };
+
+        const dark = await runTheme("dark");
+        // Colours that aren't text: against the card, in Dark
+        const style = win.getComputedStyle(doc.documentElement);
+        const toRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.trim().slice(i, i + 2), 16));
+        const chartColors = ["--macro-protein", "--macro-carbs", "--macro-fat", "--macro-fiber", "--dot"]
+          .map((name) => [name, contrastOf(toRgb(style.getPropertyValue(name)), toRgb(style.getPropertyValue("--card")))])
+          .filter(([, ratio]) => ratio < 3)
+          .map(([name, ratio]) => `${name} ${ratio.toFixed(2)}`);
+        const light = await runTheme("light");
+        return { dark, light, chartColors };
+      } finally {
+        frame.remove();
+        for (const key of Object.keys(localStorage)) if (key.startsWith("pbp.")) localStorage.removeItem(key);
+        for (const [key, value] of Object.entries(savedData)) localStorage.setItem(key, value);
+      }
+    }
+
+    // Test 50: fill the app with data, then use Clear my data on the hidden page.
+    // Everything is put back afterwards, and the other app's test key is removed.
+    async function pageClear(app) {
+      const savedData = {};
+      for (const key of Object.keys(localStorage)) if (key.startsWith("pbp.")) savedData[key] = localStorage.getItem(key);
+      const OTHER_KEY = "someOtherApp.data";
+      const pbpKeys = () => Object.keys(localStorage).filter((k) => k.startsWith("pbp.")).sort();
+      try {
+        localStorage.setItem(OTHER_KEY, "keep me");
+        localStorage.setItem("pbp.settings", JSON.stringify({ ...DEFAULTS, budget: 1234, kcal: 2000, fatPct: 25 }));
+        localStorage.setItem("pbp.myFoods", JSON.stringify(["keso"]));
+        localStorage.setItem("pbp.limits", JSON.stringify({ keso: { min: 60 } }));
+        localStorage.setItem("pbp.theme", "dark");
+        localStorage.setItem("pbp.tab", "settings");
+        localStorage.setItem("pbp.ticks", "{}");
+        let win = await reloadApp();
+        let doc = win.document;
+        const before = pbpKeys().join();
+
+        // Any browser popup would be counted here
+        let popups = 0;
+        win.confirm = () => { popups++; return true; };
+        win.alert = () => { popups++; };
+
+        doc.getElementById("clear-data").click();
+        const asked = {
+          questionShown: !doc.getElementById("clear-confirm").hidden,
+          buttonHidden: doc.getElementById("clear-data").hidden,
+          keysKept: pbpKeys().join() === before,
+        };
+        doc.getElementById("clear-no").click();
+        const cancelled = {
+          questionHidden: doc.getElementById("clear-confirm").hidden && !doc.getElementById("clear-data").hidden,
+          keysKept: pbpKeys().join() === before,
+        };
+
+        // Clear for real: the page reloads itself
+        doc.getElementById("clear-data").click();
+        const frame = document.getElementById("app-frame");
+        const loaded = new Promise((resolve) => frame.addEventListener("load", resolve, { once: true }));
+        doc.getElementById("clear-yes").click();
+        await loaded;
+        win = await waitForApp();
+        doc = win.document;
+        const value = (id) => doc.getElementById(id).value;
+        const after = {
+          keys: pbpKeys(),
+          otherKey: localStorage.getItem(OTHER_KEY),
+          shown: myFoodIds(win),
+          fields: `${value("budget")} kr, ${value("kcal")} kcal, ${value("proteinPct")}/${value("carbsPct")}/${value("fatPct")}, ±${value("tolerancePct")}, ${value("days")} days`,
+          themeAttr: doc.documentElement.getAttribute("data-theme"),
+          themePressed: doc.querySelector('[data-theme-choice][aria-pressed="true"]').dataset.themeChoice,
+          plansEmpty: !doc.getElementById("plans-empty").hidden && doc.getElementById("plans").hidden,
+          ownLimits: Boolean(doc.querySelector(".limit-mark")),
+          noteShown: !doc.getElementById("clear-done").hidden,
+          onAppPage: !doc.getElementById("panel-app").hidden,
+        };
+        win = await reloadApp();
+        const afterNextReload = {
+          noteShown: !win.document.getElementById("clear-done").hidden,
+          onGoals: !win.document.getElementById("panel-goals").hidden,
+        };
+        return { asked, cancelled, popups, after, afterNextReload };
+      } finally {
+        localStorage.removeItem(OTHER_KEY);
+        for (const key of Object.keys(localStorage)) if (key.startsWith("pbp.")) localStorage.removeItem(key);
+        for (const [key, value] of Object.entries(savedData)) localStorage.setItem(key, value);
+        await reloadApp();
+      }
+    }
+
+    // Put all the app's saved data back and reload the hidden page
+    async function restoreData(savedData) {
+      for (const key of Object.keys(localStorage)) if (key.startsWith("pbp.")) localStorage.removeItem(key);
+      for (const [key, value] of Object.entries(savedData)) localStorage.setItem(key, value);
+      await reloadApp();
+    }
+
+    // A copy of all the app's saved data
+    function snapshotData() {
+      const savedData = {};
+      for (const key of Object.keys(localStorage)) if (key.startsWith("pbp.")) savedData[key] = localStorage.getItem(key);
+      return savedData;
+    }
+
+    // Test 51: open the App settings page from each tab and come back
+    async function pageAppSettings() {
+      const savedData = snapshotData();
+      try {
+        let win = await reloadApp();
+        let doc = win.document;
+        const openPanels = () => [...doc.querySelectorAll(".tab-panel")].filter((p) => !p.hidden).map((p) => p.id.replace("panel-", "")).join("+");
+        const tap = (name) => doc.querySelector(`.tab-bar [data-tab="${name}"]`).click();
+        const gearShown = [];
+        const opened = [];
+        const back = [];
+        let whileOpen = null;
+        for (const name of ["goals", "foods", "plans", "macros"]) {
+          tap(name);
+          gearShown.push(String(!doc.getElementById("open-app").hidden));
+          doc.getElementById("open-app").click();
+          opened.push(openPanels());
+          whileOpen = {
+            noActiveTab: doc.querySelectorAll(".tab-bar .tab.active").length === 0,
+            gearHidden: doc.getElementById("open-app").hidden,
+          };
+          doc.getElementById("app-back").click();
+          back.push(openPanels());
+        }
+        // Macros was the last tab, so that's what's remembered, also while the page is open
+        doc.getElementById("open-app").click();
+        const savedTab = localStorage.getItem("pbp.tab");
+        win = await reloadApp();
+        doc = win.document;
+        const reloadedOn = openPanels();
+        // Leaving with the tab bar instead of Back
+        doc.getElementById("open-app").click();
+        tap("plans");
+        return { gearShown, opened, back, whileOpen, savedTab, reloadedOn, leaveByTab: openPanels(), gearBack: !doc.getElementById("open-app").hidden };
+      } finally {
+        await restoreData(savedData);
+      }
+    }
+
+    // Test 52: the Save button, from a first visit on
+    async function pageSave() {
+      const savedData = snapshotData();
+      const savedGoals = () => JSON.parse(localStorage.getItem("pbp.settings"));
+      try {
+        localStorage.removeItem("pbp.settings");
+        localStorage.setItem("pbp.tab", "goals");
+        localStorage.setItem("pbp.myFoods", JSON.stringify(foods.map((f) => f.id)));
+        localStorage.removeItem("pbp.limits");
+        let win = await reloadApp();
+        let doc = win.document;
+        const setInput = (id, value) => {
+          const input = doc.getElementById(id);
+          input.value = value;
+          input.dispatchEvent(new win.Event("input", { bubbles: true }));
+        };
+        const label = () => doc.getElementById("save-goals").textContent;
+        const error = () => doc.getElementById("save-error").textContent;
+        const createShown = () => !doc.getElementById("create-list").hidden;
+        const save = () => doc.getElementById("save-goals").click();
+        const staleShown = () => !doc.getElementById("plans-stale").hidden;
+        const dotShown = () => !doc.getElementById("plans-dot").hidden;
+        const tabLabel = doc.querySelector("#tab-goals .tab-label").textContent;
+        const heading = doc.querySelector("#panel-goals h2").textContent;
+
+        const first = { label: label(), createShown: createShown() };
+        setInput("budget", 3333);
+        const typed = { saved: savedGoals(), label: label() };
+        setInput("fatPct", 30);
+        save();
+        const bad = { error: error(), saved: savedGoals(), label: label(), createShown: createShown() };
+        setInput("fatPct", 25);
+        const fixed = { error: error() };
+        save();
+        const good = {
+          label: label(), createShown: createShown(), saved: savedGoals(),
+          createText: doc.getElementById("create-list").textContent,
+        };
+
+        // Enter or Go on the keyboard: the form's own submit. The marker shows the page didn't reload.
+        win.marker = "still here";
+        setInput("days", 31);
+        doc.getElementById("settings-form").requestSubmit();
+        const enterSaved = savedGoals().days === 31 && label() === "Saved ✓";
+        setInput("days", 30);
+        save();
+
+        win = await reloadApp();
+        doc = win.document;
+        const reloaded = { label: label(), budget: doc.getElementById("budget").value, createShown: createShown() };
+
+        // Save to show the Create button, then change something
+        save();
+        setInput("kcal", 1800);
+        const changed = { label: label(), createShown: createShown(), savedBudget: savedGoals().budget };
+        setInput("kcal", 1700);
+        save();
+        doc.querySelector('[data-preset="35,40,25"]').click();
+        const presetChanged = label();
+
+        // Unsaved changes don't survive a reload
+        setInput("budget", 1);
+        win = await reloadApp();
+        doc = win.document;
+        const unsavedGone = doc.getElementById("budget").value;
+
+        // Create: opens Plans and makes the plans
+        save();
+        doc.getElementById("create-list").click();
+        const started = Date.now();
+        while (doc.querySelectorAll(".plan-card").length === 0 && Date.now() - started < 15000) {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        }
+        const created = {
+          tab: localStorage.getItem("pbp.tab"),
+          cards: doc.querySelectorAll(".plan-card").length,
+          staleShown: staleShown(),
+          dotShown: dotShown(),
+        };
+
+        // A change after that marks the plans out of date
+        setInput("budget", 4444);
+        const stale = { staleShown: staleShown(), dotShown: dotShown(), label: label() };
+
+        // The Plans button with unsaved changes: uses them, and keeps them
+        await win.makeGroceryList();
+        const madeUnsaved = { label: label(), savedBudget: savedGoals().budget, staleShown: staleShown() };
+
+        // The Plans button with a split that doesn't add up
+        setInput("fatPct", 30);
+        await win.makeGroceryList();
+        const badMake = { error: doc.getElementById("plan-error").textContent, savedBudget: savedGoals().budget };
+
+        return { tabLabel, heading, first, typed, bad, fixed, good, enterSaved, reloaded, changed, presetChanged, unsavedGone, created, stale, madeUnsaved, badMake };
+      } finally {
+        await restoreData(savedData);
+      }
+    }
+
     // Wait until the hidden page has loaded app.js and its foods (the search box is enabled then;
     // My foods can be empty, so its rows can't be what we wait for)
     function waitForApp() {
@@ -2255,7 +2861,7 @@
           const win = frame.contentWindow;
           const search = win && win.document && win.document.getElementById("food-search-input");
           const ready = search && !search.disabled;
-          if (ready && typeof win.liftsOrDilutes === "function") return resolve(win);
+          if (ready && typeof win.makeGroceryList === "function") return resolve(win);
           if (Date.now() - started > 8000) return reject(new Error("index.html / app.js didn't load in the hidden frame"));
           setTimeout(check, 100);
         };

@@ -1,11 +1,31 @@
 /* Colours and spacing in one place, so they're easy to change later */
 :root {
+  color-scheme: light;
   --bg: #f5f5f2;
   --card: #ffffff;
   --text: #1d1d1b;
   --muted: #5f5f5a;
   --border: #d6d6d0;
-  --accent: #2e7d4f;
+  --accent: #2e7d4f; /* green text, borders and icons */
+  --accent-fill: #2e7d4f; /* filled green buttons, with --on-accent text on them */
+  --on-accent: #ffffff;
+  --input-bg: #ffffff;
+  --selected-bg: #eef7f1;
+  --active-bg: #eef6f0;
+  --good-bg: #d6f0dd;
+  --good-text: #1d6b3a;
+  --warn-bg: #fbefc4;
+  --warn-text: #7a5a00;
+  --warn-strong: #5c4400;
+  --bad-bg: #f8d7d5;
+  --bad-text: #9b2a22;
+  --fiber-high-bg: #e6dccd;
+  --fiber-high-text: #5a4325;
+  --fiber-source-bg: #f1ebe2;
+  --fiber-source-text: #6b5536;
+  --fiber-low-bg: #eeeeea;
+  --dot: #d0453b;
+  --shadow: rgba(0, 0, 0, 0.15);
   --radius: 12px;
   /* Macro pie chart colours */
   --macro-protein: #2e7d4f;
@@ -14,12 +34,97 @@
   --macro-fiber: #8a6d4b;
 }
 
+/* Dark colours. System follows the phone unless Light was chosen in Settings; Dark always
+   applies. The two lists must stay the same (a test in test.html checks this). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #161615;
+    --card: #222220;
+    --text: #ececea;
+    --muted: #a5a5a0;
+    --border: #3f3f3b;
+    --accent: #6cc58f;
+    --accent-fill: #2e7d4f;
+    --on-accent: #ffffff;
+    --input-bg: #1b1b1a;
+    --selected-bg: #1c3025;
+    --active-bg: #25352b;
+    --good-bg: #1d3b29;
+    --good-text: #8fdcae;
+    --warn-bg: #40340f;
+    --warn-text: #f0d27a;
+    --warn-strong: #f5dd96;
+    --bad-bg: #4a1f1c;
+    --bad-text: #f4a9a2;
+    --fiber-high-bg: #3d3123;
+    --fiber-high-text: #dcc7a6;
+    --fiber-source-bg: #332a1f;
+    --fiber-source-text: #cfbb9c;
+    --fiber-low-bg: #2e2e2b;
+    --dot: #f0635a;
+    --shadow: rgba(0, 0, 0, 0.5);
+    --macro-protein: #4caf78;
+    --macro-carbs: #e6b422;
+    --macro-fat: #6f9be0;
+    --macro-fiber: #b08f68;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #161615;
+  --card: #222220;
+  --text: #ececea;
+  --muted: #a5a5a0;
+  --border: #3f3f3b;
+  --accent: #6cc58f;
+  --accent-fill: #2e7d4f;
+  --on-accent: #ffffff;
+  --input-bg: #1b1b1a;
+  --selected-bg: #1c3025;
+  --active-bg: #25352b;
+  --good-bg: #1d3b29;
+  --good-text: #8fdcae;
+  --warn-bg: #40340f;
+  --warn-text: #f0d27a;
+  --warn-strong: #f5dd96;
+  --bad-bg: #4a1f1c;
+  --bad-text: #f4a9a2;
+  --fiber-high-bg: #3d3123;
+  --fiber-high-text: #dcc7a6;
+  --fiber-source-bg: #332a1f;
+  --fiber-source-text: #cfbb9c;
+  --fiber-low-bg: #2e2e2b;
+  --dot: #f0635a;
+  --shadow: rgba(0, 0, 0, 0.5);
+  --macro-protein: #4caf78;
+  --macro-carbs: #e6b422;
+  --macro-fat: #6f9be0;
+  --macro-fiber: #b08f68;
+}
+
 /* Make width/height include padding and borders (easier sizing) */
 * {
   box-sizing: border-box;
 }
 
-/* Base page: readable system font, no horizontal scrolling */
+/* Keep the text size when a phone is turned sideways */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* No wait after a tap, and no grey flash on iPhone */
+button,
+label,
+select,
+input {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Base page: readable system font */
 body {
   margin: 0;
   background: var(--bg);
@@ -36,10 +141,71 @@ main {
   margin: 0 auto;
 }
 
-/* Title area */
+/* Title area, with room on the right for the ⚙️ button */
+.page-header {
+  position: relative;
+}
+
 h1 {
   font-size: 1.6rem;
   margin: 8px 0 4px;
+  padding-right: 48px;
+}
+
+/* The ⚙️ button in the top-right corner */
+.icon-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  font-size: 1.4rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.icon-button:focus-visible {
+  outline: 3px solid var(--accent);
+}
+
+/* "← Back" on the App settings page */
+.back-button {
+  margin: 0 0 12px;
+}
+
+/* Save: filled green until the goals are saved, then a quiet outline saying "Saved ✓" */
+.save-goals {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  margin-top: 16px;
+  padding: 10px 16px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--on-accent);
+  background: var(--accent-fill);
+  border: 2px solid var(--accent-fill);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.save-goals.is-saved {
+  color: var(--accent);
+  background: var(--card);
+  border-color: var(--accent);
+}
+
+#save-error:empty {
+  display: none;
+}
+
+/* "Create my grocery list →" under the saved goals */
+.create-list {
+  margin-top: 12px;
 }
 
 .subtitle {
@@ -78,7 +244,7 @@ input[type="number"] {
   font-size: 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--input-bg);
   color: var(--text);
 }
 
@@ -123,6 +289,7 @@ input[type="number"]:focus {
 .macro-grid label,
 .macro-grid input {
   margin-top: 0;
+  min-width: 0;
 }
 .macro-grid-head {
   color: var(--muted);
@@ -145,7 +312,7 @@ select {
   font-size: 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--input-bg);
   color: var(--text);
 }
 
@@ -270,7 +437,7 @@ select {
   font-size: 0.9rem;
 }
 
-/* Coloured rating badges: green, yellow, red */
+/* The green Excellent badge, and the base for the small fibre and warning badges */
 .badge {
   display: inline-block;
   padding: 0 8px;
@@ -281,17 +448,11 @@ select {
   vertical-align: 1px;
 }
 
-.badge.excellent { background: #d6f0dd; color: #1d6b3a; }
-.badge.ok        { background: #fbefc4; color: #7a5a00; }
-.badge.poor      { background: #f8d7d5; color: #9b2a22; }
-
-/* "lifts" in green, "dilutes" in muted red */
-.lifts   { color: #1d6b3a; font-weight: 600; }
-.dilutes { color: #9b2a22; font-weight: 600; }
+.badge.excellent { background: var(--good-bg); color: var(--good-text); }
 
 /* Shown if foods.json can't be loaded */
 .error {
-  color: #9b2a22;
+  color: var(--bad-text);
 }
 
 /* Anything with the hidden attribute stays hidden, even if a rule below sets display */
@@ -309,8 +470,8 @@ button.primary {
   padding: 12px 16px;
   font-size: 1.1rem;
   font-weight: 700;
-  color: #fff;
-  background: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent-fill);
   border: none;
   border-radius: var(--radius);
   cursor: pointer;
@@ -335,8 +496,8 @@ button.primary:disabled {
 
 /* Yellow note, e.g. "You changed something" or a Poor-food warning */
 .warning {
-  background: #fbefc4;
-  color: #5c4400;
+  background: var(--warn-bg);
+  color: var(--warn-strong);
   border-radius: 8px;
   padding: 8px 12px;
 }
@@ -378,7 +539,7 @@ button.primary:disabled {
 /* The selected card gets a green border and a light green background */
 .plan-card.selected {
   border-color: var(--accent);
-  background: #eef7f1;
+  background: var(--selected-bg);
 }
 
 /* Keyboard focus is clearly visible */
@@ -399,7 +560,7 @@ button.primary:disabled {
 
 /* Over budget / not possible in red, within budget in green */
 .over {
-  color: #9b2a22;
+  color: var(--bad-text);
   font-weight: 600;
 }
 
@@ -470,6 +631,8 @@ button.copy-list {
   padding: 8px;
   font: inherit;
   font-size: 16px;
+  color: var(--text);
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
@@ -491,29 +654,6 @@ button.copy-list {
 #plan-detail h3 {
   font-size: 1.05rem;
   margin: 20px 0 4px;
-}
-
-/* Protein quality bar: green, yellow and red parts side by side */
-.quality-bar {
-  display: flex;
-  height: 14px;
-  margin: 8px 0;
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--border);
-}
-
-.bar-part.excellent { background: #2e9d5b; }
-.bar-part.ok        { background: #e0b300; }
-.bar-part.poor      { background: #d0453b; }
-
-/* The badges under the bar work as its legend */
-.legend {
-  margin: 0 0 8px;
-}
-
-.legend .badge {
-  margin: 0 4px 0 0;
 }
 
 /* ---------- Tabs ---------- */
@@ -591,7 +731,7 @@ main {
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  background: #d0453b;
+  background: var(--dot);
   border: 2px solid var(--card);
 }
 
@@ -654,10 +794,10 @@ button.secondary {
   margin-left: 4px;
 }
 
-.badge.fiber-high   { background: #e6dccd; color: #5a4325; }
-.badge.fiber-source { background: #f1ebe2; color: #6b5536; }
-.badge.fiber-low    { background: #eeeeea; color: var(--muted); font-weight: normal; }
-.badge.warn         { background: #fbefc4; color: #7a5a00; }
+.badge.fiber-high   { background: var(--fiber-high-bg); color: var(--fiber-high-text); }
+.badge.fiber-source { background: var(--fiber-source-bg); color: var(--fiber-source-text); }
+.badge.fiber-low    { background: var(--fiber-low-bg); color: var(--muted); font-weight: normal; }
+.badge.warn         { background: var(--warn-bg); color: var(--warn-text); }
 
 /* ---------- Macros (Macros tab) ---------- */
 
@@ -671,7 +811,7 @@ button.secondary {
 }
 
 .toggle button {
-  min-height: 40px;
+  min-height: 44px;
   min-width: 88px;
   padding: 6px 14px;
   font: inherit;
@@ -684,8 +824,8 @@ button.secondary {
 
 /* The chosen option is filled green */
 .toggle button[aria-pressed="true"] {
-  color: #fff;
-  background: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent-fill);
 }
 
 /* Pie and table side by side (they wrap on a very narrow screen) */
@@ -746,8 +886,8 @@ button.secondary {
 /* Long headers wrap, so the five columns fit on a narrow phone */
 .macro-goals thead .num { white-space: normal; }
 .macro-goals + .hint { margin-bottom: 12px; }
-.macro-goals .goal-in .actual-grams  { color: #1d6b3a; font-weight: 700; }
-.macro-goals .goal-out .actual-grams { color: #8a6500; font-weight: 700; }
+.macro-goals .goal-in .actual-grams  { color: var(--good-text); font-weight: 700; }
+.macro-goals .goal-out .actual-grams { color: var(--warn-text); font-weight: 700; }
 
 /* Colour square in front of each macro name */
 .macro-table .swatch {
@@ -779,8 +919,8 @@ button.secondary {
 }
 
 .plan-switch button[aria-pressed="true"] {
-  color: #fff;
-  background: var(--accent);
+  color: var(--on-accent);
+  background: var(--accent-fill);
 }
 
 .swatch {
@@ -811,12 +951,66 @@ button.secondary {
   border-radius: 8px;
 }
 
-.range-row.in-range     { background: #d6f0dd; color: #1d6b3a; }
-.range-row.out-of-range { background: #fbefc4; color: #5c4400; }
+.range-row.in-range     { background: var(--good-bg); color: var(--good-text); }
+.range-row.out-of-range { background: var(--warn-bg); color: var(--warn-strong); }
 
 .range-name  { font-weight: 700; min-width: 3.5em; }
 .range-value { font-weight: 600; }
 .range-target { font-size: 0.85rem; }
+
+/* ---------- App settings page ---------- */
+
+.app-card h3 {
+  font-size: 1rem;
+  margin: 16px 0 4px;
+}
+
+/* Appearance: three equal buttons across the card */
+.theme-choice {
+  display: flex;
+  margin-top: 4px;
+}
+
+.theme-choice button {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The built-in "are you sure?" step of Clear my data */
+.clear-confirm {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--warn-bg);
+  color: var(--warn-strong);
+  border-radius: 8px;
+}
+
+.clear-confirm p {
+  margin: 0;
+}
+
+.clear-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.clear-actions button {
+  flex: 1 1 130px;
+}
+
+/* A clearly dangerous button: red text and border, in both colour schemes */
+button.secondary.danger {
+  color: var(--bad-text);
+  border-color: var(--bad-text);
+}
+
+.app-about {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
 
 /* ---------- Food search and My foods (Foods tab) ---------- */
 
@@ -837,7 +1031,7 @@ input[type="search"] {
   font-size: 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--input-bg);
   color: var(--text);
   -webkit-appearance: none;
   appearance: none;
@@ -867,7 +1061,7 @@ input[type="search"]:focus {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 6px 20px var(--shadow);
 }
 
 /* One result: name and category on the left, badge and +/✓ on the right, at least 44px tall */
@@ -890,7 +1084,7 @@ input[type="search"]:focus {
 /* Highlighted with the arrow keys, or pressed */
 .food-result[aria-selected="true"],
 .food-result:active {
-  background: #eef6f0;
+  background: var(--active-bg);
 }
 
 .result-info {
@@ -921,13 +1115,13 @@ input[type="search"]:focus {
   color: var(--accent);
 }
 
-/* Foods already in My foods: tapping does nothing, so no pointer and slightly faded */
+/* Foods already in My foods: tapping does nothing, so no pointer and a muted name (still readable) */
 .food-result.added {
   cursor: default;
 }
 
-.food-result.added .result-info {
-  opacity: 0.6;
+.food-result.added .food-name {
+  color: var(--muted);
 }
 
 .no-results {

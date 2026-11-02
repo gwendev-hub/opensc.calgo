@@ -11,11 +11,11 @@
 ## 1. Scope
 
 ### In v0
-1. **Settings:** monthly budget (kr), daily calories (kcal), macro split in % with grams (section 6), a tolerance (default ±10% of the grams), days in the period (default 30).
+1. **Goals:** monthly budget (kr), daily calories (kcal), macro split in % with grams (section 6), a tolerance (default ±10% of the grams), days in the period (default 30).
 2. **Food list:** about 30 Swedish foods. Search and add the ones you'd eat to **My foods**. Optionally set a min and max amount per food.
-3. **Protein quality rating (core feature, see section 4):** every food is rated Excellent, OK or Poor as a protein source. The optimizer uses the rating, so calorie-dense foods like peanut butter, oats or lentils can't fill the plan with calories instead of protein.
+3. **Protein quality rating (core feature, see section 4):** every food is rated Excellent, OK or Poor as a protein source (only Excellent is shown on the page). The optimizer uses the rating, so calorie-dense foods like peanut butter, oats or lentils can't fill the plan with calories instead of protein.
 4. **Optimizer:** finds the cheapest combination that meets the targets and the protein quality rules.
-5. **Result:** a grocery list (packages to buy, cost per item), the total cost compared with the budget, the daily kcal and macros actually reached, and a protein quality breakdown.
+5. **Result:** a grocery list (packages to buy, cost per item), the total cost compared with the budget, the daily kcal and macros actually reached, and how much of the protein comes from Excellent sources.
 6. **Saved on the phone:** settings and My foods are kept in `localStorage`, so they're still there next time.
 
 ### Not in v0 (later, if feedback asks for it)
@@ -196,18 +196,8 @@ function proteinRating(f) {
 
 Poor doesn't mean a bad food. Rice, vegetables and oil are where the carbs and fat come from. They just shouldn't count as protein sources.
 
-### 4.2 Lifts / dilutes, and your personal target density
-**Lifts / dilutes uses a fixed threshold of 10 g protein per 100 kcal** (the same as `protein × 10 > kcal`). It does not depend on the settings:
-- **Lifts your plan:** more than 10 g protein per 100 kcal.
-- **Dilutes your plan:** 10 g or less per 100 kcal, so calories from it have to be balanced by denser foods elsewhere.
-
-**Personal target density (information only).** The protein goal sets the average protein density the whole plan needs:
-
-`targetDensity = protein goal in grams / kcalTarget × 100` g protein per 100 kcal
-
-With 30% of 1,700 kcal (127.5 g), that's **7.5 g per 100 kcal**. The page shows it as *"Your protein goal needs about 7.5 g protein per 100 kcal on average across the whole plan."* and updates it when the split or calories change. It never decides lifts/dilutes.
-
-Each food card shows the badge (Excellent/OK/Poor) and "lifts" or "dilutes".
+### 4.2 The rating stays internal
+The page shows only the green **Excellent** badge. OK and Poor still exist inside the app: the optimizer's rules and the "Best protein first" sort use them, but no badge or text shows them. The "lifts / dilutes" labels and the "target density" info line have been removed.
 
 ### 4.3 How the optimizer uses the rating
 These become constraints in the model (section 5). Defaults are listed, and all of them can be changed under "Advanced":
@@ -219,15 +209,16 @@ These become constraints in the model (section 5). Defaults are listed, and all 
 **The old "Poor foods ≤ 40% of calories" cap is gone.** Nearly all carbs and fat come from foods rated Poor, so it fought the macro goals: 3,000 kcal at about 21 / 54 / 25 had no plan at all, and at 1,700 kcal it held carbs at the bottom of their range. The macro ranges now stop any one kind of food taking over. For the same reason the warning about a single Poor food giving more than 15% of calories is gone too.
 
 ### 4.4 What the user sees
-- **Food list:** a coloured badge, protein per 100 kcal, and kr per 100 g protein on every food. Can be sorted by rating or price.
-- **Result card, "Protein quality" section:**
-  - % of protein from Excellent / OK / Poor foods (a small coloured bar)
+- **Foods tab and search results:** the green Excellent badge on Excellent foods only, no OK or Poor badges. My foods also shows protein per 100 kcal and kr per 100 g protein, and can be sorted by best protein or by price.
+- **Grocery list (Plans tab):** the same Excellent-only badge in the table, and a short "Protein quality" section:
+  - *"X% of your protein comes from Excellent sources."* (no Excellent/OK/Poor breakdown or bar)
   - % of calories from protein (`protein × 4 / kcal`)
+- There's no warning about Poor foods.
 
 ### 4.5 Other nutrients: fibre and fat
 For plans 1 and 2 fibre and saturated fat are information only; plan 3 has rules for both (section 5). The rules live in `optimizer.js` (`Optimizer.fiberRating`, `Optimizer.nutrientWarnings`) so the page and the tests use the same code.
 
-**Per food** (small badges next to the protein badge on the Foods tab):
+**Per food** (small badges next to the name on the Foods tab):
 
 | Badge | Rule (per 100 g) |
 |---|---|
@@ -336,21 +327,23 @@ Plan 1 is still solved in grams per day and rounded up afterwards, as the "absol
 
 ## 6. Screens (one page, mobile-first)
 
-Still one `index.html`, split into **four tabs**. Switching tabs only shows one section and hides the others (plain JavaScript, no page loads). The last open tab is remembered in `localStorage` (wrapped in try/catch), and each tab keeps its own scroll position while the page is open.
+Still one `index.html`, split into **four tabs** (Goals, Foods, Plans, Macros) and the App settings page. Switching tabs only shows one section and hides the others (plain JavaScript, no page loads). The last open tab is remembered in `localStorage` (wrapped in try/catch), and each tab keeps its own scroll position while the page is open.
 
 **Tab bar:** fixed to the bottom of the screen on a phone, like a phone app: four buttons with an icon and a short label, at least 44 px tall (60 px), with room for the iPhone home indicator. On a wide screen (760 px and up) it sits at the top instead, with icon and label side by side. The open tab is green and bold.
 
-1. **Settings tab:** budget, kcal, macro split, tolerance, days. Large inputs with sensible defaults (4,000 kr, 1,700 kcal, 30/45/25, ±10%, 30 days).
+1. **Goals tab** (called Settings before; a saved last tab of `"settings"` opens Goals): budget, kcal, macro split, tolerance, days. Large inputs with sensible defaults (4,000 kr, 1,700 kcal, 30/45/25, ±10%, 30 days).
    - **Macro split:** a % and a grams field for protein, carbs and fat. Grams follow the % and calories (protein and carbs ÷ 4, fat ÷ 9). Typing grams updates that macro's % (one decimal), and the other two stay as they are.
    - **Must add up to 100%:** otherwise an error shows under the fields, and "Make my grocery list" shows it too and makes no plans (`Optimizer.macroSplitProblem`; the sum is rounded to one decimal).
    - **Presets:** Balanced 30/45/25, High protein 35/40/25, Lower carb 30/30/40. The one that matches is marked.
    - **Tolerance:** ± % of each macro's grams, 1–50, default 10.
+   - **Save button** at the bottom of the form (Enter or Go on the keyboard does the same). Changes are no longer saved while typing. It checks the goals (`settingsProblem`, so the % must add up to 100); if something's wrong it shows the error under the button and saves nothing. A good save writes them to `localStorage` and the button says **Saved ✓**. If anything changes after that it says **Save changes** and plans already made are marked out of date. Before the first save it says **Save**; after a reload with saved goals, **Saved ✓**. Unsaved changes are gone after a reload.
+   - **Create my grocery list →:** a big button under the form, shown after a successful save and hidden again when something changes. It opens Plans and runs the plans.
+   - **Making plans with unsaved changes:** the button on the Plans tab uses what's on the Goals tab. If that's valid it's saved too, so the plans never show goals that disappear on reload; if not, it shows the error and makes nothing.
    - **Moving old users over:** saved settings with the old `protein` (grams) become a protein % at their saved calories; carbs and fat share the rest 45:25, so 110 g at 1,700 kcal becomes 25.9 / 47.6 / 26.5 (`migrateSettings` in `app.js`). They're saved in the new form and `protein` is removed.
 2. **Foods tab:**
-   - **Search bar** at the top ("Add a food"). Focusing it opens the **full food list in a scrollable dropdown** under it; each row shows the name, its category and the protein rating badge, plus **+** (tap to add) or **✓** (already in My foods; tapping does nothing). If an alias matched, it's shown after the name, e.g. *Canned tuna “tonfisk”*. Typing filters the list live (matching rules in section 3). Tapping a result adds it to My foods and keeps the dropdown open, so you can add several. Arrow keys and Enter work on a computer. The dropdown closes on **Escape** or a **tap outside** the search box (which also closes the phone keyboard).
+   - **Search bar** at the top ("Add a food"). Focusing it opens the **full food list in a scrollable dropdown** under it; each row shows the name, its category and the Excellent badge if the food has one, plus **+** (tap to add) or **✓** (already in My foods; tapping does nothing). If an alias matched, it's shown after the name, e.g. *Canned tuna “tonfisk”*. Typing filters the list live (matching rules in section 3). Tapping a result adds it to My foods and keeps the dropdown open, so you can add several. Arrow keys and Enter work on a computer. The dropdown closes on **Escape** or a **tap outside** the search box (which also closes the phone keyboard).
    - **Phone keyboard:** focusing the search scrolls it to the top of the screen; the dropdown's height is set to the room left above the keyboard (`window.visualViewport`) and it scrolls on its own. While it's open the bottom tab bar is hidden, so it can't cover the list. Result rows are 48 px tall, the input 44 px.
-   - The personal target-density line.
-   - **My foods (N):** only the foods you've added, grouped by category and sorted with the "Sort by" choice. Each food has a ticked checkbox on the left (untick = remove it from My foods; a 44 × 44 px tap area), its rating badge (green, yellow or red), small fibre and ⚠ sat. fat badges (section 4.5), protein per 100 kcal, "lifts/dilutes" (fixed 10 g per 100 kcal), and kr per 100 g protein. If it's empty, a hint says to search to add foods.
+   - **My foods (N):** only the foods you've added, grouped by category and sorted with the "Sort by" choice. Each food has a ticked checkbox on the left (untick = remove it from My foods; a 44 × 44 px tap area), the green Excellent badge if it has one, small fibre and ⚠ sat. fat badges (section 4.5), protein per 100 kcal, and kr per 100 g protein. If it's empty, a hint says to search to add foods.
    - **Own min/max per food:** tapping a food (everything right of the checkbox, ≥ 44 px) opens a small editor under it with **Min g/day** and **Max g/day**. Empty = use the defaults (min 0, `maxGramsPerDay`; the hint also gives `realisticMaxGramsPerDay` if the food has one). **Save** (or Enter) checks the values (numbers ≥ 0, min ≤ max; otherwise an error and nothing is saved) and closes it; **Reset** removes the food's own limits. Tapping the food again closes the editor. Foods with own limits show a small green marker, e.g. *Own limit 60–120 g*, *≥ 100 g* or *≤ 0 g*. Saved per food id in `localStorage` under `pbp.limits` (`{ "keso": { "min": 60, "max": 120 } }`, wrapped in try/catch; unknown ids and bad values are dropped on load). Only the limits of foods in My foods go to the optimizer (`settings.limits`). Changing them marks the plans out of date.
    - **The optimizer uses only My foods.**
    - **Saved:** the ids are kept in `localStorage` under `pbp.myFoods` (a list, wrapped in try/catch). On the **first visit** (nothing saved) My foods is the starter set (`"starter": true`). **Moving old users over:** if only the old `pbp.ticks` is saved (`{ id: false }` for unticked foods, everything else counted as ticked), My foods becomes every food that wasn't unticked, and `pbp.ticks` is removed once My foods is saved. A saved empty list stays empty. Ids no longer in `foods.json` are dropped.
@@ -362,20 +355,20 @@ Still one `index.html`, split into **four tabs**. Switching tabs only shows one 
    - **Grocery list of the selected plan** (below the cards, only after the first run; no macros, they have their own tab):
      - Top line: **Total 3,420 kr of 4,000 kr ✔** · **112 g protein/day** · **1,690 kcal/day**
      - Messages, e.g. over budget, or why the plan isn't possible
-     - **Grocery table** with four columns: **Food** (with its rating badge), **Per day** (grams), **Packs** and **Cost**, plus a total row. Packs says how many of which pack, e.g. *2 × 1 kg*, *7 × 250 g* or *3 × 12 eggs* (`packSize(food)` in `app.js`: pieces with `pieceName` for foods with several pieces per pack, otherwise kg from 1,000 g up, otherwise g). Nothing about leftovers.
+     - **Grocery table** with four columns: **Food** (with the Excellent badge if it has one), **Per day** (grams), **Packs** and **Cost**, plus a total row. Packs says how many of which pack, e.g. *2 × 1 kg*, *7 × 250 g* or *3 × 12 eggs* (`packSize(food)` in `app.js`: pieces with `pieceName` for foods with several pieces per pack, otherwise kg from 1,000 g up, otherwise g). Nothing about leftovers.
      - **Protein quality** section (section 4.4)
      - **Copy list** button (full width) under the table: copies the selected plan as plain text to paste into Notes or a message, then says **Copied ✓** for 2 seconds. Uses `navigator.clipboard` (https or localhost); otherwise the old copy command; if both fail, the text is shown in a box to select by hand. The text (`copyListText(plan, days)` in `app.js`):
        ```
        Cheapest realistic – 30 days
 
        Eggs & dairy
-       Eggs (12 × 60 g) 720 g – 2 packs (24 pcs) – 90 kr
-       Keso 4% 250 g – 7 packs – 154 kr
+       Eggs – 3 × 12 eggs – 135 kr
+       Keso 4% – 7 × 250 g – 154 kr
 
        Total: 1,352 kr (budget 4,000 kr)
        Per day: 115 g protein · 1,615 kcal
        ```
-       Grouped by category in `foods.json` order; one line per food with name, pack size (left out if the name already has it, e.g. *Barebells bar 55 g*), packs ("1 pack" / "N packs", pieces for foods with several per pack) and cost.
+       Grouped by category in `foods.json` order; one line per food with its name, packs in exactly the same *N × size* style as the Packs column (`packsText`), and cost. The name leaves out pack details the size already gives (`shortName`: *Eggs (12 × 60 g)* → *Eggs*, *Barebells bar 55 g* → *Barebells bar*); other brackets stay (*Hard cheese (prästost)*).
    - A last open tab saved as `"list"` (from before the merge) opens Plans.
 4. **Macros tab** (for the selected plan; before the first run it says to make plans first, with a "Go to Plans" button). Pie-chart icon. See section 4.5:
    - Plan switcher with the three plans at the top (tapping one stays on Macros)
@@ -383,7 +376,12 @@ Still one `index.html`, split into **four tabs**. Switching tabs only shows one 
    - Daily / Monthly toggle
    - Pie chart and the table: grams, kcal and % of kcal for protein (×4), carbs (×4), fat (×9) and fibre (×2), plus a total kcal row
    - The fibre range row
-5. **Footer:** where the prices come from and their date, a "not medical advice" note, and a feedback link (on every tab, above the tab bar).
+5. **App settings page:** opened with the **⚙️ button** in the top-right corner of every tab (44 × 44 px, in the page header). It isn't part of the tab bar. It has a **← Back** button that returns to the tab it was opened from; the tab bar stays visible and also leaves the page, with no tab marked while it's open. The ⚙️ is hidden on the page itself. A reload opens the last real tab, not this page. Using it doesn't mark plans out of date. On it:
+   - **Appearance:** System / Light / Dark, default System, which follows the phone. Saved under `pbp.theme` (wrapped in try/catch; an unknown value counts as System). A small script in the `<head>` sets `data-theme` on `<html>` before anything is drawn, so a dark page never flashes light. Without `data-theme`, `style.css` follows `prefers-color-scheme`. All colours are variables in `style.css`, with one light list and one dark list (repeated once, for System and for Dark, and a test checks the copies match), so dark mode covers every tab, badge, the pie chart and the tab bar. Green buttons keep a darker fill (`--accent-fill`) than green text (`--accent`), so both are readable. The phone's browser bar follows the page background (`theme-color`).
+   - **Privacy line:** *"Your data stays on this phone. Nothing is sent anywhere."*
+   - **Clear my data:** the button first shows a question on the page itself (no browser popup), with **Yes, clear it** and **Cancel**. Yes removes the `localStorage` keys that start with `pbp.`, and only those (other projects on the same GitHub Pages address share `localStorage`, so never `localStorage.clear()`), then reloads the page, which gives the first-visit state: starter foods, default settings, System, no own limits, no plans. It opens on this page with a short note that the data is cleared, once.
+   - **About:** app version (`APP_VERSION` in `app.js`), where the prices come from with their dates (read from each food's `priceSource` in `foods.json`), and "not medical advice".
+   - The feedback link comes in step 8.
 
 ---
 
@@ -405,7 +403,8 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
    *Done when:* own limits are saved and respected by all three plans, Copy list pastes a readable list, and the grocery list shows Food, Per day, Packs (*2 × 1 kg*) and Cost (tests 31–34).
 6b. **Whole packages in plans 2 and 3** (section 5).
    *Done when:* plans 2 and 3 are whole packages with every rule kept, and making the plans stays under about 2 seconds on a phone (tests 36–37).
-7. **Polish for the phone:** tap targets of at least 44 px, readable on a small screen, and a dark mode that follows the phone setting.
+7. **Polish for the phone:** tap targets of at least 44 px, no sideways scrolling at 360 px, readable on a small screen, Appearance (System / Light / Dark), and the App settings page (section 6).
+   *Done when:* every tab works at 360 px in both colour schemes, the theme choice survives a reload, and Clear my data returns to the starter state (tests 47–51).
 8. **Feedback:** add a link to a short Google Form, then share the page link with friends.
 
 ---
@@ -421,10 +420,10 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 5 | Eggs min = 100 g/day | Eggs ≥ 100 g/day in the result |
 | 6 | Check the variety cap | No single food gives more than 35% of kcal |
 | 7 | Check rounding | Packages × pack size ≥ monthly grams for every food (plans 2 and 3: exactly equal) |
-| 8 | Ratings | keso, kvarg, tuna, tofu = Excellent; eggs, lentils, salmon = OK; peanut butter, oats, rice = Poor |
+| 8 | Ratings | keso, kvarg, tuna, tofu = Excellent; eggs, lentils, salmon = OK; peanut butter, oats, rice = Poor; on the Foods tab exactly the Excellent foods have the badge |
 | 9 | Peanut butter, rapeseed oil, oats, lentils, rice + keso and tuna ticked | ≥ 60% of protein from Excellent foods; macros within their ranges |
 | 10 | Only peanut butter, oats, lentils and rice ticked | Infeasible, with the "add more Excellent protein foods" message |
-| 11 | Lifts/dilutes and target density | Lifts/dilutes uses the fixed 10 g per 100 kcal: keso and tuna "lift"; eggs, lentils, chickpeas and oats "dilute". Target density 30% of 1,700 kcal → 7.5 g per 100 kcal (info only); changing protein to 40% changes only the info line, no food's label |
+| 11 | Protein labels (real `index.html`) | Foods, search results and the grocery list show only the Excellent badge; no OK or Poor badges, lifts/dilutes labels or info line; the list says "X% of your protein comes from Excellent sources." with no breakdown and no Poor-food warning; the internal ratings and the optimizer's Excellent rule are unchanged |
 | 12 | Three plans, default settings | All three give valid plans: kcal 1,615–1,700; protein, carbs and fat within goal ± 10%; ≥ 60% / 60% / 80% of protein from Excellent |
 | 13 | Cost order, default settings | Plan 1 ≤ plan 2 ≤ plan 3 ≤ budget |
 | 14 | Floor per food | No food in plans 2 and 3 is between 0 and 35 g a day (fats with `minGramsIfUsed`: between 0 and 10 g), unless one more whole pack would go over its max (prästost: 1 pack = 23 g) |
@@ -435,18 +434,18 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 19 | Food-group limits | In plans 2 and 3 at 1,700 kcal: dairy ≤ 700 g/day; dry grains ≤ 200 g dry/day; every group in `groups.json` has members |
 | 20 | Budget 1,400 kr (between plan 2 and plan 3) | Plans 1 and 2 fit; plan 3 has no plan and says what it would cost and how far over budget |
 | 21 | Only 9 foods ticked | Plan 1 still works; plans 2 and 3 say they need at least 10 different foods (and nothing misleading) |
-| 22 | Main page with tabs (real `index.html`) | Each tab shows only its panel; tab buttons ≥ 44 px; the button on Plans shows 3 cards with Cheapest realistic selected; the selected plan's grocery list and protein quality are below the cards on the same tab (no List tab or panel); tapping a card selects it, shows its list and stays on Plans; the Plans tab has no macros; the open tab is remembered, and an old saved "list" tab opens Plans; a change shows the dot on Plans and the "out of date" note |
+| 22 | Main page with tabs (real `index.html`) | Each tab shows only its panel; tab buttons ≥ 44 px; the button on Plans shows 3 cards with Cheapest realistic selected; the selected plan's grocery list and protein quality are below the cards on the same tab (no List tab or panel); tapping a card selects it, shows its list and stays on Plans; the Plans tab has no macros; the open tab is remembered, an old saved "list" tab opens Plans and an old "settings" tab opens Goals; a change shows the dot on Plans and the "out of date" note |
 | 23 | Nutrients add up | Every food has the 5 nutrient fields, saturated fat ≤ fat, sugar ≤ carbs, and kcal ≈ 4P + 4C + 9F + 2 fibre within 15% (failures are listed) |
 | 24 | Fibre ratings and warnings | e.g. lentils, oats, chickpeas, Oumph, bread = High fibre; pasta, frozen veg, Quest chips = Source; rice, keso, tuna = Low; prästost, keso, Barebells, milk = ⚠ sat. fat; Greek yoghurt 0% has no sat. fat warning; no food gets a sugar warning and the page never shows "⚠ Sugar" (sugarPer100g still in the data); the Foods tab badges match |
 | 25 | Macro view (real `index.html`, Macros tab) | Pie drawn with a conic gradient (4 slices); table rows protein, carbs, fat, fibre with grams matching the optimizer, kcal = grams × 4 / 4 / 9 / 2, % of kcal adding up to 100, and a total kcal row; Monthly shows grams and kcal × days with the same %; the fibre row is green or yellow as expected |
 | 26 | Macros tab and plan switcher (real `index.html`) | Macros is the fourth tab, after Plans, with its own icon; the switcher shows the three plans (≥ 44 px), starts on the selected plan, and tapping a plan shows its total kcal, stays on Macros, and selects its Plans card and grocery list |
-| 27 | Food search (`searchFoods` + real `index.html`) | Finds by alias (tonfisk → both tuna products, lax → salmon), without accents (hono → Hönökaka, agg → eggs, prast → prästost, jordnotssmor → peanut butter), case-insensitive, two words in a row (cottage ch → keso); "ice" and "una" find nothing; every food has ≥ 2 aliases. On the page: focus opens the list with every food, its category and the right protein badge; typing "tonfisk" filters live; Escape and a tap outside close it, a tap inside doesn't; input and rows ≥ 44 px |
+| 27 | Food search (`searchFoods` + real `index.html`) | Finds by alias (tonfisk → both tuna products, lax → salmon), without accents (hono → Hönökaka, agg → eggs, prast → prästost, jordnotssmor → peanut butter), case-insensitive, two words in a row (cottage ch → keso); "ice" and "una" find nothing; every food has ≥ 2 aliases. On the page: focus opens the list with every food, its category and the Excellent badge on exactly the Excellent foods; typing "tonfisk" filters live; Escape and a tap outside close it, a tap inside doesn't; input and rows ≥ 44 px |
 | 28 | Adding and removing (real `index.html`) | Unticking keso removes it from My foods, the saved list and what the optimizer gets; searching "cottage" and tapping keso adds it back under its category, saves it and shows ✓; tapping it again changes nothing; the row (untick control) ≥ 44 px |
 | 29 | The optimizer uses only My foods (real `index.html`) | With 12 foods in My foods, the button makes the same three plans (foods and totals) as `Optimizer.planAll` with only those 12, and no grocery list has any other food |
 | 30 | Starter set and moving old ticks over (reloads `index.html`) | 12–18 foods have `"starter": true` and give three valid plans; first visit (nothing saved) shows and saves exactly the starter set; old `pbp.ticks` with keso and oil unticked becomes every other food, and `pbp.ticks` is removed; a saved empty list stays empty |
 | 31 | Own min/max in all three plans | Limits eggs min 100, keso 60–120, tofu max 20, kvarg min 320, rice max 0: every plan finds a plan with each food inside its limits; kvarg's realistic max is raised to 320 g (whole packages: exactly 20 packs); tofu's floor is lowered to 20 g (whole packages: at most 1 pack, and 1 pack is its floor) |
 | 32 | Min/max editor (real `index.html`) | Tapping keso opens its editor (empty max shows 300 as a hint); min 150 / max 100 shows an error and saves nothing; 60 / 120 is saved under `pbp.limits`, closes the editor and shows the marker on keso only; the plans keep keso between 60 and 120 g; reopening shows 60 / 120; Reset removes the limits and the marker and marks plans out of date; food button and untick area ≥ 44 px |
-| 33 | Copy list | `copyListText` on a hand-made plan gives exactly the text from section 6 (categories in order, pieces for eggs, no double pack size for Barebells, "1 pack"); on the page the button copies the selected plan (clipboard replaced by a stand-in) and says "Copied ✓" |
+| 33 | Copy list | `copyListText` on a hand-made plan gives exactly the text from section 6 (categories in order, *Eggs – 3 × 12 eggs – 135 kr*, no double pack size for Barebells); on the page the button copies the selected plan (clipboard replaced by a stand-in), every line has what its Packs column shows, and it says "Copied ✓" |
 | 34 | Simpler grocery list (real `index.html`) | Every plan's table has the columns Food, Per day, Packs, Cost; each Packs cell is "packages × pack size" matching the optimizer (`packSize`: eggs "12 eggs", rice "1 kg", oats "1.5 kg", keso "250 g"); no leftover notes or warnings anywhere |
 | 35 | Failed plans say why and what to change | For rice + apples, Poor/OK foods only, budgets 500 / 1,150 / 1,400, 9 foods, oil min 200 g and own max 0 on keso and tuna: every message has something to do; "too few Excellent" names Excellent foods from `foods.json` that aren't in My foods; the minimums message names the oil; own max limits are pointed out |
 | 36 | Whole packages in plans 2 and 3 | With default settings, the own limits of test 31, 7 days, and 14 days at 2,400 kcal / 160 g: every food in plans 2 and 3 is a whole number of packages (grams per day × days = packages × pack size) and every rule holds (kcal, macros, Excellent, plan 3's fibre and saturated fat, variety, floor, max, scaled groups, 10 foods); plan 1 is still in grams per day |
@@ -460,8 +459,14 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 | 44 | New foods | Mixed nuts, olive oil, whole-grain pasta and avocado have a pack, price and nutrition "to check"; only one potatoes food |
 | 45 | Settings form and moving old settings (real `index.html`, reloads) | Defaults 1,700 kcal, 30/45/25, ±10%; grams 128/191/47, and 225/338/83 at 3,000 kcal; typing 160 g gives 21.3%; presets fill in and mark the %; old 110 g at 1,700 kcal becomes 25.9/47.6/26.5, saved without `protein` |
 | 46 | Macros tab: goal vs actual (real `index.html`) | Protein, carbs and fat show goal grams with range, actual grams, goal % and actual %, matching the optimizer and marked in range; only fibre is left in the range rows |
+| 47 | Appearance (reloads `index.html`) | System by default; Dark and Light set the page's theme and survive a reload, and really change the colours; System removes the override; an unknown saved value counts as System; the System and Dark colour lists are identical; no fixed colours outside the lists |
+| 48 | Readable on every tab (real page, 360 px) | In Dark and Light, on Goals (also with errors, Save changes and Saved ✓ with the Create button), App settings (also with the Clear question), Foods (also with an editor and the search open), Plans and Macros (each plan, incl. over budget and "not possible"): all text and input text at least 4.5:1 against what's behind it, counting opacity. In Dark the pie, swatches and dot at least 3:1 against the card |
+| 49 | 360 px wide (real page) | In the same states: no sideways scrolling, nothing past the screen edges, and every button, link, input, select, food row and checkbox area at least 44 × 44 px |
+| 50 | Clear my data (reloads `index.html`) | The first tap only asks, on the page; Cancel changes nothing; no browser popup; Yes leaves only what a first visit saves, keeps another app's key, and gives the starter foods, default settings, System, no plans and no own limits; the note shows once, on the App settings page, and the next reload opens Goals |
+| 51 | App settings page (real `index.html`) | ⚙️ on every tab, not in the tab bar, labelled for screen readers; it opens only this page from every tab and Back returns to that tab; no tab marked and ⚙️ hidden while open; the tab bar also leaves it; a reload opens the last real tab; Goals holds none of it; the data line word for word, version, every price source from `foods.json`, "Not medical advice", System/Light/Dark, Clear my data |
+| 52 | Goals tab: Save (real `index.html`, reloads) | Tab and heading say Goals; first visit says Save with no Create button; typing saves nothing; a split of 105% shows the error and saves nothing; a good save says Saved ✓, stores the goals (also values like 3,333 kr that don't fit the fields' step) and shows "Create my grocery list →"; Enter or Go saves without reloading; after a reload Saved ✓ with no Create button; a change or preset says Save changes and hides it, and the saved goals stay until Save; unsaved changes are gone after a reload; Create opens Plans and makes 3 plans; a later change marks them out of date; the Plans button uses and saves valid unsaved changes, and shows the error for a bad split |
 
-"Tuna" in tests 4, 8 and 9 means both tuna products (canned and frozen). Test 4 also uses a food set where tuna is normally picked, and test 6 adds a stress case (quality rules off, every max × 10) so the variety cap actually has to do something. `test.html` also shows the three default plans side by side. The page tests start with every food in My foods and no own min/max, and the user's own saved data (`pbp.*` in `localStorage`) is put back after the run.
+"Tuna" in tests 4, 8 and 9 means both tuna products (canned and frozen). Test 4 also uses a food set where tuna is normally picked, and test 6 adds a stress case (quality rules off, every max × 10) so the variety cap actually has to do something. A browser test can't switch the phone's own dark setting, so test 47 checks System through the colour lists; check it by hand once on the phone. `test.html` also shows the three default plans side by side. The page tests start with every food in My foods and no own min/max, and the user's own saved data (`pbp.*` in `localStorage`) is put back after the run.
 
 ---
 
@@ -489,5 +494,5 @@ Each step is one small commit. Ask Claude in VS Code to do one step at a time.
 
 - **Bad prices or nutrition data give bad advice.** Show sources and dates, and make editing `foods.json` easy.
 - **The optimizer picks odd combinations** or fills calories with cheap, low-protein foods. That's why the protein quality rules, max limits and variety cap exist. Expect to tune them after the first real month.
-- **Health:** this plans calories and macros only. It isn't a complete diet plan or medical advice. Say so in the footer.
+- **Health:** this plans calories and macros only. It isn't a complete diet plan or medical advice. Say so under About on the App settings page.
 - **Scope creep:** nothing from section 10 goes in before steps 1–8 are done and at least 3 friends have tried it.

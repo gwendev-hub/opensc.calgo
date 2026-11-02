@@ -4,23 +4,39 @@
   <!-- Basic page setup: text encoding and phone-friendly scaling -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Colour of the phone's browser bar; app.js keeps it the same as the page background -->
+  <meta id="theme-color" name="theme-color" content="#f5f5f2">
+  <meta name="color-scheme" content="light dark">
   <title>Protein Budget Planner</title>
+  <!-- Set the chosen appearance before anything is drawn, so a dark page never flashes light -->
+  <script>
+    try {
+      var savedTheme = localStorage.getItem("pbp.theme");
+      if (savedTheme === "light" || savedTheme === "dark") document.documentElement.setAttribute("data-theme", savedTheme);
+    } catch (err) {
+      // Storage blocked: System (following the phone) is the default anyway
+    }
+  </script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main>
     <!-- Page title and one-line explanation -->
-    <header>
+    <header class="page-header">
+      <!-- Opens the App settings page; it's here so it's on every tab, and isn't part of the tab bar -->
+      <button type="button" id="open-app" class="icon-button" aria-label="App settings"><span aria-hidden="true">⚙️</span></button>
       <h1>Protein Budget Planner</h1>
       <p class="subtitle">The cheapest monthly grocery list that hits your calorie and macro goals.</p>
     </header>
 
-    <!-- ===== Tab 1: Settings ===== -->
-    <div id="panel-settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-settings">
-      <!-- Settings card: the numbers the optimizer will use -->
-      <section class="card" aria-labelledby="settings-title">
-        <h2 id="settings-title">Settings</h2>
-        <form id="settings-form">
+    <!-- ===== Tab 1: Goals ===== -->
+    <div id="panel-goals" class="tab-panel" role="tabpanel" aria-labelledby="tab-goals">
+      <!-- Goals card: the numbers the optimizer will use -->
+      <section class="card" aria-labelledby="goals-title">
+        <h2 id="goals-title">Goals</h2>
+        <!-- autocomplete off: a reload (e.g. after Clear my data) must not bring back old values.
+             novalidate: Save does its own checks; the browser's would block e.g. 3333 kr because of step="50" -->
+        <form id="settings-form" autocomplete="off" novalidate>
           <!-- Monthly budget in Swedish kronor -->
           <label for="budget">Monthly budget (kr)</label>
           <input id="budget" name="budget" type="number" inputmode="numeric" min="0" step="50" value="4000">
@@ -63,8 +79,16 @@
           <!-- How many days the grocery list should cover -->
           <label for="days">Days in the period</label>
           <input id="days" name="days" type="number" inputmode="numeric" min="1" max="62" step="1" value="30">
+
+          <!-- Checks the goals and saves them (a submit button, so Enter or Go on the keyboard saves too) -->
+          <button type="submit" id="save-goals" class="save-goals">Save</button>
+          <p id="save-error" class="error" role="alert"></p>
         </form>
+
+        <!-- Shown after a successful save: opens Plans and makes the plans -->
+        <button type="button" id="create-list" class="primary create-list" hidden>Create my grocery list →</button>
       </section>
+
     </div>
 
     <!-- ===== Tab 2: Foods ===== -->
@@ -84,19 +108,13 @@
           <ul id="food-results" class="food-results" role="listbox" aria-label="Foods" hidden></ul>
         </div>
 
-        <p class="hint">
-          Your protein goal needs about <strong id="target-density">–</strong> g protein per 100 kcal
-          on average across the whole plan.
-          Foods with more than 10 g protein per 100 kcal <em>lift</em> your plan; the rest <em>dilute</em> it.
-        </p>
-
         <h3 class="section-title">My foods <span id="my-food-count" class="muted"></span></h3>
         <p class="hint">Plans only use these foods. Untick a food to remove it; tap a food to set its own min and max grams per day.</p>
 
         <!-- How to order foods inside each category -->
         <label for="food-sort">Sort by</label>
         <select id="food-sort">
-          <option value="rating">Protein rating</option>
+          <option value="rating">Best protein first</option>
           <option value="price">Price per 100 g protein</option>
         </select>
 
@@ -135,14 +153,50 @@
       </section>
       <section id="macro-section" class="card" aria-live="polite" hidden></section>
     </div>
+
+    <!-- ===== App settings: a page of its own, opened with the ⚙️ button (not in the tab bar) ===== -->
+    <div id="panel-app" class="tab-panel" hidden>
+      <button type="button" id="app-back" class="secondary back-button">← Back</button>
+      <!-- Appearance, clearing data, privacy and about -->
+      <section class="card app-card" aria-labelledby="app-title">
+        <h2 id="app-title">App settings</h2>
+
+        <h3 id="theme-title">Appearance</h3>
+        <div class="toggle theme-choice" role="group" aria-labelledby="theme-title">
+          <button type="button" data-theme-choice="system" aria-pressed="true">System</button>
+          <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+          <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+        </div>
+
+        <h3>Your data</h3>
+        <p id="privacy-line">Your data stays on this phone. Nothing is sent anywhere.</p>
+        <!-- Clear my data has a confirmation step here on the page (app.js shows and hides it) -->
+        <button type="button" id="clear-data" class="secondary danger">Clear my data</button>
+        <div id="clear-confirm" class="clear-confirm" role="alertdialog" aria-labelledby="clear-question" hidden>
+          <p id="clear-question">Clear your settings, My foods, own limits and appearance from this phone? Foods go back to the starter set. This can't be undone.</p>
+          <div class="clear-actions">
+            <button type="button" id="clear-yes" class="secondary danger">Yes, clear it</button>
+            <button type="button" id="clear-no" class="secondary">Cancel</button>
+          </div>
+        </div>
+        <p id="clear-done" class="hint" role="status" hidden>Your data is cleared. The app is back to the starter set.</p>
+
+        <h3>About</h3>
+        <ul class="app-about">
+          <li>Version <span id="app-version">–</span></li>
+          <li>Prices: <span id="price-source">–</span>. Check them against your own store.</li>
+          <li>Not medical advice. This plans calories and macros only; it isn't a complete diet plan.</li>
+        </ul>
+      </section>
+    </div>
   </main>
 
   <!-- Tab bar. Each button shows one panel above (app.js). Icons are simple inline SVGs. -->
   <nav class="tab-bar" role="tablist" aria-label="Sections">
-    <button type="button" class="tab" id="tab-settings" role="tab" aria-controls="panel-settings" aria-selected="true" data-tab="settings">
+    <button type="button" class="tab" id="tab-goals" role="tab" aria-controls="panel-goals" aria-selected="true" data-tab="goals">
       <!-- Sliders icon -->
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
-      <span class="tab-label">Settings</span>
+      <span class="tab-label">Goals</span>
     </button>
     <button type="button" class="tab" id="tab-foods" role="tab" aria-controls="panel-foods" aria-selected="false" data-tab="foods">
       <!-- Ticked checklist icon -->

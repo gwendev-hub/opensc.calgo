@@ -1,6 +1,9 @@
 // Key used to store the settings in the browser's localStorage
 const SETTINGS_KEY = "pbp.settings";
 
+// The app's version, shown under About in the App section
+const APP_VERSION = "0.7.0";
+
 // The names of the settings inputs (matches the id of each <input>)
 const SETTING_FIELDS = ["budget", "kcal", "proteinPct", "carbsPct", "fatPct", "tolerancePct", "days"];
 
@@ -42,12 +45,14 @@ function loadSettings() {
   }
 }
 
-// Save the current settings object to localStorage
+// Save the current settings object to localStorage. Returns false if saving failed.
 function saveSettings(settings) {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    return true;
   } catch (err) {
     // If saving fails the page still works; settings just won't be remembered
+    return false;
   }
 }
 
@@ -95,6 +100,102 @@ function gramsToPct(macroKey) {
   if (kcal > 0) document.getElementById(`${macroKey}Pct`).value = roundPct(((grams * macro.kcalPerGram) / kcal) * 100);
 }
 
+// ---------- Appearance (PLAN.md section 6, App section) ----------
+
+// Key of the saved choice: "system" (default, follows the phone), "light" or "dark"
+const THEME_KEY = "pbp.theme";
+const THEMES = ["system", "light", "dark"];
+
+// The saved choice ("system" if there is none, it's unknown, or storage is blocked)
+function loadTheme() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    return THEMES.includes(saved) ? saved : "system";
+  } catch (err) {
+    return "system";
+  }
+}
+
+// Save the choice (the page still works if this fails)
+function saveTheme(choice) {
+  try {
+    localStorage.setItem(THEME_KEY, choice);
+  } catch (err) {
+    // The choice just won't be remembered
+  }
+}
+
+// Give the phone's browser bar the same colour as the page
+function updateThemeColor() {
+  const background = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+  document.getElementById("theme-color").setAttribute("content", background);
+}
+
+// Use a choice: style.css reads data-theme; without it, System follows the phone.
+// Also marks the chosen button in the App section.
+function applyTheme(choice) {
+  if (choice === "system") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", choice);
+  for (const button of document.querySelectorAll("[data-theme-choice]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.themeChoice === choice));
+  }
+  updateThemeColor();
+}
+
+// ---------- Clear my data (PLAN.md section 6, App section) ----------
+
+// All of this app's localStorage keys start with this. Other apps on the same address
+// (e.g. other GitHub Pages projects on the same account) share localStorage, so
+// only keys with this start may be removed; never localStorage.clear().
+const STORAGE_PREFIX = "pbp.";
+// Tells the page after the reload to say the data was cleared (this tab only, gone on the next visit)
+const CLEARED_FLAG = "pbp.justCleared";
+
+// Remove this app's keys. Returns false if storage is blocked.
+function clearMyData() {
+  try {
+    // List the keys first: removing while looping would shift the positions
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    for (const key of keys) {
+      if (key.startsWith(STORAGE_PREFIX)) localStorage.removeItem(key);
+    }
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+// "Yes, clear it": remove the data and reload, which is exactly what a first visit does
+function confirmClearData() {
+  clearMyData();
+  try {
+    sessionStorage.setItem(CLEARED_FLAG, "1");
+  } catch (err) {
+    // Only the "cleared" note is lost
+  }
+  window.location.reload();
+}
+
+// Show or hide the confirmation step, and move the focus sensibly for keyboards and screen readers
+function showClearConfirm(show) {
+  document.getElementById("clear-confirm").hidden = !show;
+  document.getElementById("clear-data").hidden = show;
+  document.getElementById(show ? "clear-no" : "clear-data").focus();
+}
+
+// After the reload: say the data was cleared, once, on the page the button was on
+function showClearedNote() {
+  try {
+    if (sessionStorage.getItem(CLEARED_FLAG) === null) return;
+    sessionStorage.removeItem(CLEARED_FLAG);
+    document.getElementById("clear-done").hidden = false;
+    showTab(APP_PAGE, { toTop: true });
+  } catch (err) {
+    // No note then
+  }
+}
+
 // ---------- Foods ----------
 
 // Key used to store the ids of the foods in My foods, e.g. ["keso", "eggs"]
@@ -134,24 +235,6 @@ function proteinPer100kcal(f) {
 function krPer100gProtein(f) {
   const proteinGramsInPack = (f.packGrams * f.proteinPer100g) / 100;
   return proteinGramsInPack > 0 ? (f.packPrice / proteinGramsInPack) * 100 : Infinity;
-}
-
-// The average protein density the whole plan needs: g protein per 100 kcal.
-// Shown for information only; it does NOT decide lifts/dilutes (PLAN.md section 4.2).
-function targetDensity(settings) {
-  return settings.kcal > 0 ? (Optimizer.macroGoals(settings).protein.goal / settings.kcal) * 100 : 0;
-}
-
-// Fixed rule, independent of settings: more than 10 g protein per 100 kcal lifts the plan,
-// 10 g or less dilutes it. Written as protein × 10 > kcal to avoid rounding errors.
-function liftsOrDilutes(f) {
-  return f.proteinPer100g * 10 > f.kcalPer100g ? "lifts" : "dilutes protein goal";
-}
-
-// Write the personal target density into the info line above the food list
-function renderTargetDensity() {
-  const density = targetDensity(readSettingsFromForm());
-  document.getElementById("target-density").textContent = density.toFixed(1);
 }
 
 // Read one JSON value from localStorage (null if nothing is saved, it's bad data, or storage is blocked)
@@ -366,7 +449,11 @@ function removeFood(id) {
 // Sort functions for the "Sort by" dropdown
 const RATING_ORDER = { excellent: 0, ok: 1, poor: 2 };
 // Text shown on the rating badges
-const RATING_LABELS = { excellent: "Excellent", ok: "OK", poor: "Poor" };
+// Only Excellent foods get a protein badge. OK and Poor stay internal: the optimizer
+// and the "Best protein first" sort still use them, but the page doesn't show them.
+function proteinBadgeHtml(rating) {
+  return rating === "excellent" ? '<span class="badge excellent">Excellent</span>' : "";
+}
 // Text for the fibre badges and the nutrient warnings (PLAN.md section 4.5)
 const FIBER_LABELS = { high: "High fibre", source: "Fibre source", low: "Low fibre" };
 const WARNING_LABELS = { satFat: "⚠ Sat. fat" };
@@ -403,8 +490,6 @@ const SORTERS = {
 // as a button (tap to open its min/max editor) with name, badges, own-limit marker and numbers
 function foodRowHtml(f) {
   const rating = Optimizer.proteinRating(f);
-  const ratingLabel = RATING_LABELS[rating];
-  const lift = liftsOrDilutes(f);
   const kr = krPer100gProtein(f);
   const krText = kr === Infinity ? "no protein" : `${Math.round(kr)} kr / 100 g protein`;
   const editing = editingFood === f.id;
@@ -422,11 +507,10 @@ function foodRowHtml(f) {
           <span class="visually-hidden">Keep ${esc(f.name)} in My foods (untick to remove)</span>
         </label>
         <button type="button" class="food-info" data-edit="${f.id}" aria-expanded="${editing}" aria-controls="limit-editor-${f.id}">
-          <span class="food-name">${esc(f.name)}</span><span class="badge ${rating}">${ratingLabel}</span>${nutrientBadgesHtml(f)}${marker}<br>
+          <span class="food-name">${esc(f.name)}</span>${proteinBadgeHtml(rating)}${nutrientBadgesHtml(f)}${marker}<br>
           <span class="food-stats">
             ${proteinPer100kcal(f).toFixed(1)} g protein / 100 kcal ·
-            ${krText} ·
-            <span class="${lift}">${lift}</span>
+            ${krText}
           </span>
         </button>
       </div>
@@ -516,7 +600,7 @@ function resultRowHtml(f, query) {
         <span class="food-name">${esc(f.name)}</span>${alias}<br>
         <span class="result-category">${esc(f.category)}</span>
       </span>
-      <span class="badge ${rating}">${RATING_LABELS[rating]}</span>
+      ${proteinBadgeHtml(rating)}
       <span class="result-mark" aria-hidden="true">${added ? "✓" : "+"}</span>
       ${added ? '<span class="visually-hidden">(in My foods)</span>' : ""}
     </li>`;
@@ -696,6 +780,7 @@ async function loadFoods() {
     setupMyFoods();
     setupLimits();
     renderFoods();
+    document.getElementById("price-source").textContent = priceSourceText(foods);
     // The search box and the button only work once the data is here
     document.getElementById("food-search-input").disabled = false;
     document.getElementById("make-list").disabled = false;
@@ -766,22 +851,9 @@ function planCardHtml(plan) {
 
 // Build the protein quality section (PLAN.md section 4.4) for one plan
 function proteinQualityHtml(plan) {
-  const share = plan.quality.proteinShare;
-
-  // Coloured bar: % of protein from Excellent / OK / Poor foods
-  const parts = ["excellent", "ok", "poor"].filter((r) => share[r] > 0);
-  const bar = parts
-    .map((r) => `<span class="bar-part ${r}" style="width:${(share[r] * 100).toFixed(1)}%"></span>`)
-    .join("");
-  const legend = ["excellent", "ok", "poor"]
-    .map((r) => `<span class="badge ${r}">${RATING_LABELS[r]} ${pct(share[r])}</span>`)
-    .join(" ");
-
   return `
     <h3>Protein quality</h3>
-    <p class="hint">Where your protein comes from:</p>
-    <div class="quality-bar" role="img" aria-label="Protein from Excellent ${pct(share.excellent)}, OK ${pct(share.ok)}, Poor ${pct(share.poor)}">${bar}</div>
-    <p class="legend">${legend}</p>
+    <p class="protein-share">${pct(plan.quality.proteinShare.excellent)} of your protein comes from Excellent sources.</p>
     <p>${pct(plan.quality.proteinKcalShare)} of your calories come from protein.</p>`;
 }
 
@@ -957,7 +1029,7 @@ function groceryTableHtml(plan) {
       const f = foods.find((x) => x.id === i.id);
       return `
         <tr data-id="${i.id}">
-          <td>${esc(i.name)}<span class="badge ${i.rating}">${RATING_LABELS[i.rating]}</span></td>
+          <td>${esc(i.name)}${proteinBadgeHtml(i.rating)}</td>
           <td class="num">${num(i.gramsPerDay)} g</td>
           <td class="num packs">${packsText(i, f)}</td>
           <td class="num">${num(i.cost)} kr</td>
@@ -976,11 +1048,19 @@ function groceryTableHtml(plan) {
     </table>`;
 }
 
+// A food's name without the pack details the "N × size" part already gives:
+// "Eggs (12 × 60 g)" → "Eggs", "Barebells bar 55 g" → "Barebells bar".
+// Other brackets stay, e.g. "Hard cheese (prästost)".
+function shortName(f) {
+  return f.name.replace(/\s*\([^)]*\d[^)]*\)$/, "").replace(new RegExp(`\\s${f.packGrams} g$`), "");
+}
+
 // The selected plan as plain text for Notes or a message, grouped by category, e.g.
 //   Cheapest realistic – 30 days
 //
 //   Eggs & dairy
-//   Keso 4% 250 g – 7 packs – 154 kr
+//   Eggs – 3 × 12 eggs – 135 kr
+//   Keso 4% – 7 × 250 g – 154 kr
 //
 //   Total: 1,352 kr (budget 4,000 kr)
 //   Per day: 115 g protein · 1,690 kcal
@@ -996,15 +1076,11 @@ function copyListText(plan, days) {
     byCategory.get(f.category).push({ f, item });
   }
 
-  // One line per food: name and pack size, packs (and pieces), cost
+  // One line per food: name, packs in the same style as the Packs column, cost
   for (const [category, rows] of byCategory) {
     lines.push("", category);
     for (const { f, item } of rows) {
-      // Skip the pack size if the name already says it (e.g. "Barebells bar 55 g")
-      const size = f.name.includes(`${f.packGrams} g`) ? "" : ` ${num(f.packGrams)} g`;
-      const packs = `${item.packages} ${item.packages === 1 ? "pack" : "packs"}`;
-      const pieces = f.pieceGrams && f.pieceGrams < f.packGrams ? ` (${item.piecesToBuy} pcs)` : "";
-      lines.push(`${f.name}${size} – ${packs}${pieces} – ${num(item.cost)} kr`);
+      lines.push(`${shortName(f)} – ${packsText(item, f)} – ${num(item.cost)} kr`);
     }
   }
 
@@ -1131,6 +1207,10 @@ async function makeGroceryList() {
     return;
   }
 
+  // The plans use what's on the Goals tab, so keep those goals: otherwise the plans
+  // would show goals that are gone after a reload
+  if (saveSettings(settings)) setSaveState("saved");
+
   // Show that something is happening; solving can take a second on an old phone
   button.disabled = true;
   button.textContent = "Working…";
@@ -1180,23 +1260,28 @@ function markPlansStale() {
 const TAB_KEY = "pbp.tab";
 
 // The four tabs, in the order of the tab bar
-const TABS = ["settings", "foods", "plans", "macros"];
+const TABS = ["goals", "foods", "plans", "macros"];
+
+// The App settings page: shown like a tab, but not in the tab bar and not remembered
+const APP_PAGE = "app";
 
 // Where each tab was scrolled to, so coming back to e.g. Foods keeps your place
 const tabScroll = {};
 
 // The tab that's open right now
 let currentTab = null;
+// The tab the App settings page was opened from, for its back button
+let tabBeforeApp = "goals";
 
-// Read the last open tab from localStorage ("settings" if none, or storage is blocked)
+// Read the last open tab from localStorage ("goals" if none, or storage is blocked)
 function loadTab() {
   try {
     const saved = localStorage.getItem(TAB_KEY);
     // The old List tab is now part of Plans
     if (saved === "list") return "plans";
-    return TABS.includes(saved) ? saved : "settings";
+    return TABS.includes(saved) ? saved : "goals";
   } catch (err) {
-    return "settings";
+    return "goals";
   }
 }
 
@@ -1205,7 +1290,7 @@ function saveTab(name) {
   try {
     localStorage.setItem(TAB_KEY, name);
   } catch (err) {
-    // The page still works; it just opens on Settings next time
+    // The page still works; it just opens on Goals next time
   }
 }
 
@@ -1223,9 +1308,108 @@ function showTab(name, { toTop = false } = {}) {
     button.classList.toggle("active", isOpen);
   }
 
+  // The App settings page has no button in the tab bar, and needs no ⚙️ while it's open
+  document.getElementById("panel-app").hidden = name !== APP_PAGE;
+  document.getElementById("open-app").hidden = name === APP_PAGE;
+
+  // Remember where to go back to. Reloading opens the last real tab, not this page.
+  if (name === APP_PAGE) tabBeforeApp = TABS.includes(currentTab) ? currentTab : tabBeforeApp;
+  else saveTab(name);
   currentTab = name;
-  saveTab(name);
   window.scrollTo(0, toTop ? 0 : tabScroll[name] || 0);
+}
+
+// ---------- Saving the goals ----------
+
+// The Save button's three states: never saved, saved, and changed since the last save
+const SAVE_LABELS = { new: "Save", saved: "Saved ✓", changed: "Save changes" };
+let saveState = "new";
+
+// Show a state on the Save button
+function setSaveState(state) {
+  saveState = state;
+  const button = document.getElementById("save-goals");
+  button.textContent = SAVE_LABELS[state];
+  button.classList.toggle("is-saved", state === "saved");
+}
+
+// The Save button: check the goals, save them, and offer to make the plans.
+// Nothing is saved while something's wrong.
+function saveGoals() {
+  const settings = readSettingsFromForm();
+  const error = document.getElementById("save-error");
+  const createButton = document.getElementById("create-list");
+  const problem = settingsProblem(settings);
+  if (problem) {
+    error.textContent = problem;
+    createButton.hidden = true;
+    return;
+  }
+  // The goals still work if storage is blocked; they just won't be there next time
+  if (saveSettings(settings)) {
+    error.textContent = "";
+    setSaveState("saved");
+  } else {
+    error.textContent = "Couldn't save on this device, so your goals will be gone when you close the page.";
+  }
+  createButton.hidden = false;
+}
+
+// A goal changed: it isn't saved yet, so don't offer to make plans from it
+function goalsChanged() {
+  document.getElementById("save-error").textContent = "";
+  document.getElementById("create-list").hidden = true;
+  if (saveState === "saved") setSaveState("changed");
+  markPlansStale();
+}
+
+// "Create my grocery list →": open Plans and make the plans
+async function createList() {
+  showTab("plans", { toTop: true });
+  await makeGroceryList();
+}
+
+// ---------- App settings page ----------
+
+// Where the prices come from, from foods.json: each source with how many foods use it,
+// e.g. "Estimate, Oct 2026 (33 foods) and Estimate, Nov 2026 (4 foods)"
+function priceSourceText(list) {
+  const counts = new Map();
+  for (const f of list) counts.set(f.priceSource, (counts.get(f.priceSource) || 0) + 1);
+  return [...counts].map(([source, n]) => `${source} (${n} ${n === 1 ? "food" : "foods"})`).join(" and ");
+}
+
+// Connect the App settings page's buttons and fill in the version
+function setupAppPage() {
+  document.getElementById("app-version").textContent = APP_VERSION;
+
+  // Appearance: use the choice and remember it
+  document.querySelector(".theme-choice").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-theme-choice]");
+    if (!button) return;
+    saveTheme(button.dataset.themeChoice);
+    applyTheme(button.dataset.themeChoice);
+  });
+  applyTheme(loadTheme());
+  // System: the phone can switch to dark in the evening while the page is open
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", updateThemeColor);
+  }
+
+  // Clear my data: first the built-in question, then only "Yes" clears anything
+  document.getElementById("clear-data").addEventListener("click", () => showClearConfirm(true));
+  document.getElementById("clear-no").addEventListener("click", () => showClearConfirm(false));
+  document.getElementById("clear-yes").addEventListener("click", confirmClearData);
+
+  // The ⚙️ button opens the page, and Back returns to the tab it was opened from
+  document.getElementById("open-app").addEventListener("click", () => {
+    showTab(APP_PAGE, { toTop: true });
+    document.getElementById("app-back").focus();
+  });
+  document.getElementById("app-back").addEventListener("click", () => {
+    showTab(tabBeforeApp);
+    document.getElementById("open-app").focus();
+  });
 }
 
 // ---------- Start-up ----------
@@ -1237,22 +1421,22 @@ function init() {
     fillForm(saved);
     // Keep old settings in their new form (saved again unchanged if they already were)
     saveSettings(readSettingsFromForm());
+    setSaveState("saved");
   }
 
-  // Show the macro grams and the personal target density straight away
-  renderMacroFields();
-  renderTargetDensity();
+  // Appearance, Clear my data and About
+  setupAppPage();
 
-  // Something in the settings changed: save it and redraw what depends on it
+  // Show the macro grams straight away
+  renderMacroFields();
+
+  // Something in the goals changed: redraw the grams and mark it as not saved yet
   const settingsChanged = (skipId) => {
     renderMacroFields(skipId);
-    saveSettings(readSettingsFromForm());
-    renderTargetDensity();
-    markPlansStale();
+    goalsChanged();
   };
 
-  // Settings changed (food labels don't depend on settings). Grams update their %
-  // first; the field being typed in keeps what the user typed.
+  // Grams update their % first; the field being typed in keeps what the user typed.
   const form = document.getElementById("settings-form");
   form.addEventListener("input", (event) => {
     const typedGrams = SPLIT_MACROS.find((m) => event.target.id === `${m.key}Grams`);
@@ -1268,6 +1452,15 @@ function init() {
     SPLIT_MACROS.forEach((m, i) => (document.getElementById(`${m.key}Pct`).value = pcts[i]));
     settingsChanged();
   });
+
+  // Save: the button, or Enter or Go on the keyboard. preventDefault stops the page reloading.
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveGoals();
+  });
+
+  // "Create my grocery list →" after a save
+  document.getElementById("create-list").addEventListener("click", createList);
 
   // A food in My foods was unticked: remove it from My foods
   document.getElementById("food-list").addEventListener("change", (event) => {
@@ -1343,8 +1536,9 @@ function init() {
     if (link) showTab(link.dataset.goTab, { toTop: true });
   });
 
-  // Open the tab that was open last time
+  // Open the tab that was open last time, or the App settings page right after clearing data
   showTab(loadTab());
+  showClearedNote();
 
   loadFoods();
 }
